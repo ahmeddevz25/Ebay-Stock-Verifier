@@ -1,19 +1,17 @@
 # 🚀 Stockline — eBay Stock & Inventory Verifier (Bulk 10,000+ Links)
 
-Modern, eye-catching Web UI aur High-Performance Engine jo Excel sheet me mojood hazaron eBay product links ko verify karke unka live stock status (`IN STOCK`, `OUT OF STOCK`, `SOLD OUT / ENDED`, `INVALID`) original Excel sheet me update karta hy.
+Table-first Web UI aur High-Performance Engine jo Excel sheet me mojood hazaron eBay product links ko verify karke unka live stock status (`IN STOCK`, `OUT OF STOCK`, `SOLD OUT / ENDED`, `INVALID`) original Excel sheet me update karta hy.
 
 ---
 
 ## ✨ Features (Khasusiyat)
 
-1. **Eye-Catching Modern UI:**
-   * Naya light "ledger / manifest" design (Stockline): cream paper, bold typography, left-rail steps, big progress numeral aur colour-coded status distribution bar.
-   * Real-time animated progress bar aur speed indicator (~150 items/sec).
-   * 4 KPI tiles:
-     * 🟢 **Available / In Stock** (Quantity ke sath)
-     * 🟡 **Out of Stock** (Active listing, Qty = 0)
-     * 🔴 **Sold Out / Ended** (Closed listing)
-     * ⚪ **Invalid / Removed** (Link expire / deleted)
+1. **Table-first UI (light + dark):**
+   * Upar dark control band: file, link column, Verify / Pause / Export aur live progress ek hi jagah.
+   * **Stock Wall:** har listing ka ek square. Verify ke waqt scanner aage badhta hai aur squares live rang badalte hain; tab dabane par sirf wohi squares roshan hote hain; square par click karke table ki us row par jump.
+   * Filter tabs hi stats hain (In stock / Out of stock / Sold / Invalid + percentage) aur ek colour distribution bar.
+   * Item ID par click karke copy, `/` dabake search, drag-drop poori window par.
+   * Settings side drawer mein (Demo / Live API), bottom status bar mein mode aur speed.
 2. **Bulk 10,000+ Links Support:**
    * 1-by-1 check karne ki bajaye **20 links ka batch** request bhejta hy (eBay Browse API standard).
    * 10,000 links sirf ~45 to 60 seconds me verify ho jate hain.
