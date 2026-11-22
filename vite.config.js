@@ -6,7 +6,7 @@ function apiDevPlugin() {
     name: 'api-dev-server',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (req.url === '/api/ebay/verify-batch' && req.method === 'POST') {
+        if (req.url?.startsWith('/api/ebay/verify-batch') && req.method === 'POST') {
           let body = '';
           req.on('data', chunk => body += chunk);
           req.on('end', () => {
