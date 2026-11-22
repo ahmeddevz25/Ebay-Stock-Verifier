@@ -1,6 +1,9 @@
 {
+  "framework": "vite",
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/ebay/auth", "destination": "/api/auth" },
-    { "source": "/api/ebay/verify-batch", "destination": "/api/verify-batch" }
+    { "source": "/api/ebay/auth", "destination": "/api/auth.js" },
+    { "source": "/api/ebay/verify-batch", "destination": "/api/verify-batch.js" }
   ]
 }
