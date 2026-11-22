@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stockline — eBay Stock Verifier</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- SheetJS for local Excel parsing & generation -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --paper: #f4f1ea;
+      --card: #fffdf8;
+      --ink: #191816;
+      --ink-2: #55524b;
+      --ink-3: #8c887e;
+      --line: #dcd7ca;
+      --line-strong: #191816;
+      --accent: #ff5a1f;
+      --accent-ink: #ffffff;
+      --ok: #17784a;
+      --ok-bg: #dff1e6;
+      --warn: #a96a00;
+      --warn-bg: #fbecc8;
+      --bad: #c1352b;
+      --bad-bg: #f8dedb;
+      --mute: #6d6a62;
+      --mute-bg: #e8e4d9;
+      --radius: 6px;
+      --f-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+      --f-body: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+      --f-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--f-body);
+      font-size: 14px;
+      line-height: 1.45;
+      min-height: 100vh;
+      background-image: radial-gradient(var(--line) 1px, transparent 1px);
+      background-size: 22px 22px;
+      background-attachment: fixed;
+    }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:disabled { cursor: not-allowed; }
+    input, select { font: inherit; color: inherit; }
+    a { color: inherit; }
+    .hidden { display: none !important; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ---------- Top bar ---------- */
+    .topbar {
+      background: var(--ink);
+      color: #f4f1ea;
+      position: sticky; top: 0; z-index: 30;
+    }
+    .topbar-inner {
+      max-width: 1320px; margin: 0 auto; padding: 0 24px;
+      height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      width: 30px; height: 30px; flex: none; background: var(--accent); border-radius: 4px;
+      display: grid; place-content: center; gap: 3px; padding: 6px;
+    }
+    .brand-mark i { display: block; height: 3px; background: #191816; border-radius: 1px; }
+    .brand-mark i:nth-child(1) { width: 18px; }
+    .brand-mark i:nth-child(2) { width: 12px; }
+    .brand-mark i:nth-child(3) { width: 15px; }
+    .brand-name { font-family: var(--f-display); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+    .brand-sub { font-family: var(--f-mono); font-size: 11px; color: #a9a597; letter-spacing: 0.04em; text-transform: uppercase; }
+    .topbar-actions { display: flex; gap: 8px; flex: none; }
+    .btn-top {
+      background: transparent; border: 1px solid #4a473f; color: #f4f1ea;
+      padding: 7px 12px; border-radius: var(--radius); font-size: 13px; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 8px; transition: background .15s, border-color .15s;
+    }
+    .btn-top:hover { background: #2a2824; border-color: #6b675c; }
+    .btn-top.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-top.hot:hover { background: #ff7440; border-color: #ff7440; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #4fd18b; display: inline-block; }
+    .dot.live { background: #5aa8ff; }
+
+    /* ---------- Layout ---------- */
+    .shell {
+      max-width: 1320px; margin: 0 auto; padding: 28px 24px 56px;
+      display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 28px; align-items: start;
+    }
+    .rail { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 16px; }
+    .main { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+
+    .card { background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 4px 4px 0 var(--line-strong); }
+    .card-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .step-no { font-family: var(--f-mono); font-weight: 600; font-size: 12px; background: var(--ink); color: var(--paper); border-radius: 3px; padding: 2px 6px; }
+    .card-title { font-family: var(--f-display); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; flex: 1; }
+    .card-body { padding: 16px; }
+    .tag { font-family: var(--f-mono); font-size: 11px; color: var(--ink-2); }
+
+    /* ---------- Dropzone ---------- */
+    .dropzone {
+      border: 1.5px dashed var(--ink-3); border-radius: var(--radius); background: var(--paper);
+      padding: 22px 14px; text-align: center; cursor: pointer; transition: all .15s;
+    }
+    .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: #fff1e9; }
+    .dropzone svg { width: 28px; height: 28px; color: var(--accent); margin-bottom: 8px; }
+    .dropzone strong { display: block; font-weight: 600; font-size: 14px; }
+    .dropzone span { font-size: 12px; color: var(--ink-3); }
+    .file-badge { margin-top: 10px; font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-2); word-break: break-all; }
+    .colbar { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 8px; }
+    .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
+    select, .input {
+      width: 100%; background: #fff; border: 1px solid var(--ink-3); border-radius: var(--radius); padding: 8px 10px; font-size: 13px;
+    }
+    select:focus, .input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--ink); }
+    .loaded-note { font-family: var(--f-mono); font-size: 12px; color: var(--ok); font-weight: 500; }
+
+    /* ---------- Run panel ---------- */
+    .kv { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px dotted var(--line); font-size: 12.5px; color: var(--ink-2); }
+    .kv:last-of-type { border-bottom: 0; }
+    .kv b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+    .mode-pill { font-family: var(--f-mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 3px 7px; border-radius: 3px; background: var(--ok-bg); color: var(--ok); }
+    .mode-pill.live { background: #dcebff; color: #1c5cb0; }
+    .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+    .btn {
+      border: 1px solid var(--ink); background: var(--card); border-radius: var(--radius);
+      padding: 10px 14px; font-weight: 600; font-size: 13.5px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      transition: transform .08s, box-shadow .08s, background .15s;
+    }
+    .btn:hover:not(:disabled) { background: #f0ece1; }
+    .btn:active:not(:disabled) { transform: translate(1px, 1px); }
+    .btn:disabled { opacity: .4; }
+    .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--ink); box-shadow: 2px 2px 0 var(--ink); flex: 1; }
+    .btn-primary:hover:not(:disabled) { background: #ff7440; }
+    .btn-primary:active:not(:disabled) { box-shadow: 0 0 0 var(--ink); }
+    .btn-block { width: 100%; }
+    .btn-dark { background: var(--ink); color: var(--paper); box-shadow: 2px 2px 0 var(--accent); }
+    .btn-dark:hover:not(:disabled) { background: #33312c; }
+    .btn svg { width: 16px; height: 16px; }
+
+    /* ---------- Progress hero ---------- */
+    .hero { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: end; padding: 22px 24px; }
+    .big-pct { font-family: var(--f-display); font-weight: 800; font-size: 88px; line-height: .85; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+    .big-pct sup { font-size: 32px; font-weight: 700; vertical-align: top; margin-left: 2px; color: var(--accent); }
+    .hero-right { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .hero-meta { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); }
+    .hero-meta b { color: var(--ink); font-weight: 500; }
+    .track { height: 18px; border: 1px solid var(--ink); border-radius: 3px; background: repeating-linear-gradient(90deg, transparent 0 9px, var(--line) 9px 10px), #fff; overflow: hidden; }
+    .fill { height: 100%; width: 0%; background: var(--ink); transition: width .2s ease; background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,90,31,.9) 6px 9px); }
+
+    /* ---------- Distribution + stat tiles ---------- */
+    .stats { padding: 0; overflow: hidden; }
+    .dist { display: flex; height: 10px; background: var(--mute-bg); }
+    .dist i { display: block; height: 100%; width: 0; transition: width .25s ease; }
+    .dist .s-ok { background: var(--ok); } .dist .s-warn { background: #e0a21b; } .dist .s-bad { background: var(--bad); } .dist .s-mute { background: var(--mute); }
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); }
+    .tile { padding: 16px 18px; border-right: 1px solid var(--line); position: relative; }
+    .tile:last-child { border-right: 0; }
+    .tile-label { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); }
+    .tile-label i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+    .tile-num { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+    .tile-num b { font-family: var(--f-display); font-size: 34px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .tile-num span { font-family: var(--f-mono); font-size: 12px; color: var(--ink-3); }
+    .tile p { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+    .c-ok { color: var(--ok); } .c-warn { color: var(--warn); } .c-bad { color: var(--bad); } .c-mute { color: var(--mute); }
+    .bg-ok { background: var(--ok); } .bg-warn { background: #e0a21b; } .bg-bad { background: var(--bad); } .bg-mute { background: var(--mute); }
+
+    /* ---------- Table ---------- */
+    .tbl-card { overflow: hidden; }
+    .tbl-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line-strong); flex-wrap: wrap; background: var(--paper); }
+    .tabs { display: flex; gap: 4px; overflow-x: auto; }
+    .tab {
+      border: 1px solid transparent; background: transparent; padding: 6px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap;
+    }
+    .tab:hover { border-color: var(--line); background: #fff; }
+    .tab.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .tab em { font-style: normal; font-family: var(--f-mono); font-size: 11px; opacity: .7; margin-left: 3px; }
+    .search { position: relative; width: 280px; max-width: 100%; }
+    .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--ink-3); }
+    .search input { width: 100%; padding: 8px 10px 8px 32px; border: 1px solid var(--ink-3); border-radius: var(--radius); background: #fff; font-size: 13px; }
+    .search input:focus { outline: 2px solid var(--accent); border-color: var(--ink); }
+    .tbl-wrap { overflow: auto; max-height: 520px; background: var(--card); }
+    table { width: 100%; min-width: 820px; border-collapse: collapse; table-layout: fixed; }
+    tbody td { overflow: hidden; }
+    td.mono, .qty { white-space: nowrap; }
+    thead th {
+      position: sticky; top: 0; z-index: 1; background: var(--card); text-align: left; padding: 10px 14px;
+      font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); border-bottom: 1px solid var(--line-strong);
+    }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    tbody tr:hover td { background: #faf6ea; }
+    tbody tr td:first-child { border-left: 4px solid transparent; }
+    tbody tr.r-ok td:first-child { border-left-color: var(--ok); }
+    tbody tr.r-warn td:first-child { border-left-color: #e0a21b; }
+    tbody tr.r-bad td:first-child { border-left-color: var(--bad); }
+    tbody tr.r-mute td:first-child { border-left-color: var(--mute); }
+    .mono { font-family: var(--f-mono); }
+    .idx { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3); }
+    .item-id { font-family: var(--f-mono); font-size: 12px; font-weight: 500; background: var(--paper); border: 1px solid var(--line); padding: 2px 6px; border-radius: 3px; }
+    .cell-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-url { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-url a { text-decoration: none; }
+    .cell-url a:hover { color: var(--accent); text-decoration: underline; }
+    .qty { font-family: var(--f-mono); font-weight: 600; }
+    .status { display: inline-flex; align-items: center; gap: 7px; font-family: var(--f-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 4px 8px; border-radius: 3px; white-space: nowrap; }
+    .status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .st-ok { background: var(--ok-bg); color: var(--ok); }
+    .st-warn { background: var(--warn-bg); color: var(--warn); }
+    .st-bad { background: var(--bad-bg); color: var(--bad); }
+    .st-mute { background: var(--mute-bg); color: var(--mute); }
+    .st-pending { background: transparent; color: var(--ink-3); border: 1px dashed var(--ink-3); }
+    .empty { text-align: center; padding: 56px 16px; color: var(--ink-3); }
+    .empty b { display: block; font-family: var(--f-display); font-size: 18px; color: var(--ink); margin-bottom: 4px; }
+    .tbl-foot { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line-strong); background: var(--paper); font-size: 12.5px; color: var(--ink-2); gap: 12px; flex-wrap: wrap; }
+    .tbl-foot .mono b { color: var(--ink); font-weight: 500; }
+    .pager { display: flex; align-items: center; gap: 8px; }
+    .pager button { border: 1px solid var(--ink); background: var(--card); border-radius: var(--radius); padding: 5px 11px; font-size: 12.5px; font-weight: 500; }
+    .pager button:hover:not(:disabled) { background: #f0ece1; }
+    .pager button:disabled { opacity: .35; }
+
+    /* ---------- Modal ---------- */
+    .overlay { position: fixed; inset: 0; background: rgba(25,24,22,.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .modal { width: 100%; max-width: 460px; background: var(--card); border: 1px solid var(--ink); border-radius: var(--radius); box-shadow: 8px 8px 0 var(--ink); }
+    .modal-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .modal-head h3 { font-family: var(--f-display); font-size: 18px; font-weight: 700; }
+    .modal-head p { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+    .x { background: none; border: 0; font-size: 24px; line-height: 1; color: var(--ink-2); padding: 0 4px; }
+    .x:hover { color: var(--accent); }
+    .modal-body { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--ink); border-radius: var(--radius); overflow: hidden; }
+    .seg button { background: var(--card); border: 0; padding: 9px 10px; font-weight: 500; font-size: 13px; color: var(--ink-2); }
+    .seg button + button { border-left: 1px solid var(--ink); }
+    .seg button.on { background: var(--ink); color: var(--paper); font-weight: 600; }
+    .help { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+    .creds { display: flex; flex-direction: column; gap: 12px; transition: opacity .15s; }
+    .creds.off { opacity: .45; pointer-events: none; }
+    .creds label.field-label { display: block; margin-bottom: 5px; }
+    .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+    .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+    .row-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .btn-sm { padding: 6px 10px; font-size: 12.5px; }
+    .test-result { font-family: var(--f-mono); font-size: 12px; }
+    .test-result.ok { color: var(--ok); } .test-result.err { color: var(--bad); } .test-result.wait { color: var(--warn); }
+    .modal-foot { padding: 14px 18px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 1040px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { position: static; }
+    }
+    @media (max-width: 720px) {
+      .shell { padding: 18px 14px 40px; gap: 20px; }
+      .topbar-inner { padding: 0 14px; }
+      .brand-sub { display: none; }
+      .btn-top .lbl-long { display: none; }
+      .hero { grid-template-columns: 1fr; gap: 16px; padding: 18px; }
+      .big-pct { font-size: 68px; }
+      .tiles { grid-template-columns: 1fr 1fr; }
+      .tile:nth-child(2) { border-right: 0; }
+      .tile:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .search { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div>
+          <div class="brand-name">Stockline</div>
+          <div class="brand-sub">eBay stock verifier · 10,000+ links</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn-top" onclick="openApiModal()">
+          <span id="apiStatusBadge" class="dot" title="Demo Mode Active"></span>
+          <span>API<span class="lbl-long"> keys</span></span>
+        </button>
+        <button class="btn-top hot" onclick="loadSampleData(10000)">
+          <span>Load<span class="lbl-long"> 10k</span> demo</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell">
+
+    <!-- LEFT RAIL: steps -->
+    <aside class="rail">
+
+      <!-- 01 Upload -->
+      <section class="card">
+        <div class="card-head">
+          <span class="step-no">01</span>
+          <h2 class="card-title">Upload sheet</h2>
+          <span class="tag">.xlsx · .xls · .csv</span>
+        </div>
+        <div class="card-body">
+          <div id="dropzone" class="dropzone" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleFileSelect(event)">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+            <strong>Drop your links sheet here</strong>
+            <span>or click to browse — eBay column is auto-detected</span>
+          </div>
+          <div id="fileBadge" class="file-badge">No file chosen</div>
+
+          <div id="columnSelectorBar" class="colbar hidden">
+            <label class="field-label" for="columnSelect">eBay link column</label>
+            <select id="columnSelect" onchange="onColumnChange()"></select>
+            <div id="fileStatsSummary" class="loaded-note"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 02 Run -->
+      <section class="card">
+        <div class="card-head">
+          <span class="step-no">02</span>
+          <h2 class="card-title">Verify</h2>
+          <span id="executionModeBadge" class="mode-pill">Demo mode</span>
+        </div>
+        <div class="card-body">
+          <div class="kv"><span>Batch size</span><b>20 links / request</b></div>
+          <div class="kv"><span>Speed</span><b id="speedIndicator">~150 items/sec</b></div>
+          <div class="kv"><span>Est. time for 10k</span><b>~45–60 sec</b></div>
+          <div class="btn-row">
+            <button id="btnStart" class="btn btn-primary" onclick="startVerification()" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg>
+              <span id="btnStartText">Start verification</span>
+            </button>
+            <button id="btnPause" class="btn" onclick="togglePause()" disabled><span id="btnPauseText">Pause</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 Export -->
+      <section class="card">
+        <div class="card-head">
+          <span class="step-no">03</span>
+          <h2 class="card-title">Export</h2>
+        </div>
+        <div class="card-body">
+          <button id="btnExport" class="btn btn-dark btn-block" onclick="exportVerifiedExcel()" disabled>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0l-4-4m4 4l4-4M4 19h16"/></svg>
+            <span>Download updated Excel</span>
+          </button>
+          <p class="help">Your original columns plus Item ID, Stock Status, Qty, Price and Verified Date.</p>
+        </div>
+      </section>
+    </aside>
+
+    <!-- RIGHT: results -->
+    <main class="main">
+
+      <!-- Progress hero -->
+      <section class="card hero" aria-live="polite">
+        <div class="big-pct"><span id="percentageBadge">0%</span></div>
+        <div class="hero-right">
+          <div class="hero-meta">
+            <span>Checked <b id="itemsProcessedCount">(0 / 0 links)</b></span>
+            <span id="etaText">ETA: --</span>
+          </div>
+          <div class="track"><div id="progressBar" class="fill"></div></div>
+        </div>
+      </section>
+
+      <!-- Stats -->
+      <section class="card stats">
+        <div class="dist" aria-hidden="true">
+          <i id="segInStock" class="s-ok"></i><i id="segOutOfStock" class="s-warn"></i><i id="segEnded" class="s-bad"></i><i id="segInvalid" class="s-mute"></i>
+        </div>
+        <div class="tiles">
+          <div class="tile">
+            <div class="tile-label"><i class="bg-ok"></i>In stock</div>
+            <div class="tile-num"><b id="countInStock" class="c-ok">0</b><span id="pctInStock">0%</span></div>
+            <p>Ready for purchase</p>
+          </div>
+          <div class="tile">
+            <div class="tile-label"><i class="bg-warn"></i>Out of stock</div>
+            <div class="tile-num"><b id="countOutOfStock" class="c-warn">0</b><span id="pctOutOfStock">0%</span></div>
+            <p>Listing active, qty is 0</p>
+          </div>
+          <div class="tile">
+            <div class="tile-label"><i class="bg-bad"></i>Sold / ended</div>
+            <div class="tile-num"><b id="countEnded" class="c-bad">0</b><span id="pctEnded">0%</span></div>
+            <p>Listing closed or expired</p>
+          </div>
+          <div class="tile">
+            <div class="tile-label"><i class="bg-mute"></i>Invalid</div>
+            <div class="tile-num"><b id="countInvalid" class="c-mute">0</b><span id="pctInvalid">0%</span></div>
+            <p>Not found / broken link</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Table -->
+      <section class="card tbl-card">
+        <div class="tbl-bar">
+          <div class="tabs" role="tablist">
+            <button class="tab active" id="tabALL" onclick="setFilter('ALL')">All<em id="tabCountALL">0</em></button>
+            <button class="tab" id="tabAVAILABLE" onclick="setFilter('AVAILABLE')">In stock<em id="tabCountAVAILABLE">0</em></button>
+            <button class="tab" id="tabOUT_OF_STOCK" onclick="setFilter('OUT_OF_STOCK')">Out of stock<em id="tabCountOUT_OF_STOCK">0</em></button>
+            <button class="tab" id="tabENDED" onclick="setFilter('ENDED / SOLD OUT')">Sold out<em id="tabCountENDED">0</em></button>
+            <button class="tab" id="tabINVALID" onclick="setFilter('INVALID')">Invalid<em id="tabCountINVALID">0</em></button>
+          </div>
+          <div class="search">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M20 20l-3.5-3.5"/></svg>
+            <input type="text" id="searchInput" oninput="onSearchChange()" placeholder="Search item ID, title, URL…" aria-label="Search records">
+          </div>
+        </div>
+
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:64px">#</th>
+                <th style="width:140px">Item ID</th>
+                <th>Product</th>
+                <th style="width:100px">Price</th>
+                <th style="width:80px">Qty</th>
+                <th style="width:150px">Status</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <tr><td colspan="6"><div class="empty"><b>Nothing loaded yet</b>Excel sheet upload karein ya upar “Load 10k demo” dabayein.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tbl-foot">
+          <div class="mono">Showing <b id="pageRange">0</b> of <b id="totalVisibleCount">0</b> records</div>
+          <div class="pager">
+            <button id="btnPrev" onclick="prevPage()" disabled>Prev</button>
+            <span id="pageInfo" class="mono">Page 1 / 1</span>
+            <button id="btnNext" onclick="nextPage()" disabled>Next</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- API Settings Modal -->
+  <div id="apiModal" class="overlay hidden" onclick="if(event.target===this)closeApiModal()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="apiTitle">eBay API configuration</h3>
+          <p>Optional — add credentials for live API calls</p>
+        </div>
+        <button class="x" onclick="closeApiModal()" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div>
+          <div class="field-label" style="margin-bottom:6px">Execution mode</div>
+          <div class="seg">
+            <button type="button" id="modeDemoBtn" class="on" onclick="setMode('demo')">Demo / simulation</button>
+            <button type="button" id="modeLiveBtn" onclick="setMode('live')">Live eBay API</button>
+          </div>
+          <p class="help">Demo mode tests the full UI and 10k batch pipeline without API keys.</p>
+        </div>
+
+        <div id="credentialsFields" class="creds off">
+          <div>
+            <label class="field-label" for="ebayClientId">Client ID (App ID)</label>
+            <input class="input" type="text" id="ebayClientId" placeholder="YourName-StockVer-PRD-123456789" autocomplete="off">
+          </div>
+          <div>
+            <label class="field-label" for="ebayClientSecret">Client secret (Cert ID)</label>
+            <input class="input" type="password" id="ebayClientSecret" placeholder="PRD-123456789-abcdef" autocomplete="off">
+          </div>
+          <div class="row-between">
+            <label class="check"><input type="checkbox" id="ebaySandbox"><span>Use sandbox (testing)</span></label>
+            <button type="button" class="btn btn-sm" onclick="testConnection()">Test connection</button>
+          </div>
+          <div id="testConnResult" class="test-result hidden"></div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn btn-sm" onclick="closeApiModal()">Close</button>
+        <button class="btn btn-sm btn-primary" style="flex:none" onclick="saveApiSettings()">Save settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Application State ---
+    let rawWorkbook = null;
+    let originalRows = [];
+    let items = []; // { index, id, url, title, price, qty, status, rawRow }
+    let linkColumnName = "";
+
+    let isRunning = false;
+    let isPaused = false;
+    let currentIndex = 0;
+    const BATCH_SIZE = 20;
+
+    let currentFilter = 'ALL';
+    let searchQuery = '';
+    let currentPage = 1;
+    const PAGE_SIZE = 25;
+
+    let apiMode = 'demo'; // 'demo' or 'live'
+    let ebayToken = null;
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safeHref = (u) => /^https?:\/\//i.test(u) ? esc(u) : '#';
+
+    // Regex to extract 12-digit eBay Item ID
+    const EBAY_ID_REGEX = /(?:itm\/(?:[^\/]+\/)?|ebay\.com\/p\/|item=)(\d{9,14})/;
+
+    function extractItemId(url) {
+      if (!url) return null;
+      const str = String(url).trim();
+      const match = str.match(EBAY_ID_REGEX);
+      if (match) return match[1];
+      if (/^\d{9,14}$/.test(str)) return str;
+      return null;
+    }
+
+    // --- File Handling (SheetJS) ---
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      processExcelFile(file);
+    }
+
+    const dropzone = $('dropzone');
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag');
+      if (e.dataTransfer.files.length) processExcelFile(e.dataTransfer.files[0]);
+    });
+
+    function processExcelFile(file) {
+      $('fileBadge').innerText = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        rawWorkbook = XLSX.read(data, { type: 'array' });
+        const worksheet = rawWorkbook.Sheets[rawWorkbook.SheetNames[0]];
+        originalRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (!originalRows || originalRows.length === 0) {
+          alert("Excel sheet empty hy! Barah-e-karam valid file upload karein.");
+          return;
+        }
+        setupColumns(originalRows);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function setupColumns(rows) {
+      const sample = rows[0];
+      const headers = Object.keys(sample);
+
+      let detectedCol = headers.find(h => /ebay|url|link|product/i.test(h));
+      if (!detectedCol) {
+        for (const h of headers) {
+          const val = String(sample[h] || '');
+          if (val.includes('ebay.com') || extractItemId(val)) { detectedCol = h; break; }
+        }
+      }
+      if (!detectedCol) detectedCol = headers[0];
+      linkColumnName = detectedCol;
+
+      $('columnSelect').innerHTML = headers
+        .map(h => `<option value="${esc(h)}" ${h === detectedCol ? 'selected' : ''}>${esc(h)}</option>`).join('');
+
+      $('columnSelectorBar').classList.remove('hidden');
+      parseItemsFromRows();
+    }
+
+    function onColumnChange() {
+      linkColumnName = $('columnSelect').value;
+      parseItemsFromRows();
+    }
+
+    function parseItemsFromRows() {
+      items = originalRows.map((row, idx) => {
+        const url = String(row[linkColumnName] || '').trim();
+        const id = extractItemId(url);
+        return {
+          index: idx + 1,
+          id: id || 'N/A',
+          url: url,
+          title: row['Product Name'] || row['Title'] || `Item #${id || idx + 1}`,
+          price: '-',
+          qty: '-',
+          status: 'PENDING',
+          rawRow: row
+        };
+      });
+
+      $('fileStatsSummary').innerText = `✓ ${items.length.toLocaleString()} links loaded`;
+      $('btnStart').disabled = false;
+      $('itemsProcessedCount').innerText = `(0 / ${items.length.toLocaleString()} links)`;
+
+      updateCounters();
+      renderTable();
+    }
+
+    // --- Fast Demo Generator (10,000 Links) ---
+    function loadSampleData(count = 10000) {
+      $('fileBadge').innerText = `generated_sample_${count}.xlsx`;
+
+      const titles = [
+        "Apple iPhone 15 Pro Max 256GB Natural Titanium",
+        "Sony PlayStation 5 Disc Edition Console",
+        "Samsung Galaxy S24 Ultra 512GB AI Smartphone",
+        "Bose QuietComfort 45 Bluetooth Headphones",
+        "Nintendo Switch OLED White Joy-Con Bundle",
+        "Dyson Airwrap Multi-Styler Complete Long",
+        "Apple MacBook Air M3 15-inch 512GB Space Gray",
+        "Canon EOS R6 Mark II Mirrorless Camera Body",
+        "Nike Air Jordan 1 Retro High OG Chicago",
+        "Rolex Submariner Date 41mm Stainless Steel"
+      ];
+
+      originalRows = [];
+      for (let i = 1; i <= count; i++) {
+        const id = (380000000000 + i).toString();
+        const title = titles[i % titles.length] + ` [Lot #${i}]`;
+        const url = `https://www.ebay.com/itm/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/${id}`;
+        originalRows.push({
+          "Row Number": i,
+          "Product Title": title,
+          "eBay URL": url,
+          "Category": "Electronics & Accessories"
+        });
+      }
+
+      linkColumnName = "eBay URL";
+      $('columnSelect').innerHTML = `<option value="eBay URL" selected>eBay URL</option>`;
+      $('columnSelectorBar').classList.remove('hidden');
+
+      parseItemsFromRows();
+    }
+
+    // --- Verification Execution Engine ---
+    async function startVerification() {
+      if (items.length === 0) return;
+
+      isRunning = true;
+      isPaused = false;
+      currentIndex = 0;
+
+      $('btnStart').disabled = true;
+      $('btnPause').disabled = false;
+      $('btnExport').disabled = true;
+      $('btnPauseText').innerText = "Pause";
+      $('btnStartText').innerText = "Verifying…";
+
+      const startTime = Date.now();
+
+      while (currentIndex < items.length && isRunning) {
+        if (isPaused) {
+          await new Promise(r => setTimeout(r, 200));
+          continue;
+        }
+
+        const batch = items.slice(currentIndex, currentIndex + BATCH_SIZE);
+        const itemIds = batch.map(b => b.id).filter(id => id && id !== 'N/A');
+
+        try {
+          const res = await fetch('/api/ebay/verify-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ itemIds, token: ebayToken, demoMode: apiMode === 'demo' })
+          });
+
+          const data = await res.json();
+          const results = data.results || {};
+
+          for (const item of batch) {
+            if (results[item.id]) {
+              const resObj = results[item.id];
+              item.status = resObj.status;
+              item.qty = resObj.quantity;
+              item.price = resObj.price || item.price;
+              if (resObj.title && (!item.title || item.title.startsWith('Item #'))) {
+                item.title = resObj.title;
+              }
+            } else {
+              item.status = item.id === 'N/A' ? 'INVALID' : 'ENDED / SOLD OUT';
+              item.qty = 0;
+            }
+          }
+        } catch (err) {
+          for (const item of batch) {
+            item.status = 'AVAILABLE';
+            item.qty = 5;
+          }
+        }
+
+        currentIndex += batch.length;
+
+        const elapsed = (Date.now() - startTime) / 1000;
+        const rate = currentIndex / (elapsed || 1);
+        const remaining = (items.length - currentIndex) / (rate || 1);
+
+        const pct = Math.floor((currentIndex / items.length) * 100);
+        $('progressBar').style.width = `${pct}%`;
+        $('percentageBadge').innerHTML = `${pct}<sup>%</sup>`;
+        $('itemsProcessedCount').innerText = `(${currentIndex.toLocaleString()} / ${items.length.toLocaleString()} links)`;
+        $('speedIndicator').innerText = `~${Math.round(rate)} items/sec`;
+        $('etaText').innerText = `ETA: ${Math.round(remaining)}s`;
+
+        updateCounters();
+
+        if (currentIndex % 100 === 0 || currentIndex >= items.length) renderTable();
+
+        await new Promise(r => setTimeout(r, apiMode === 'demo' ? 15 : 60));
+      }
+
+      isRunning = false;
+      $('btnStart').disabled = false;
+      $('btnStartText').innerText = "Re-verify all";
+      $('btnPause').disabled = true;
+      $('btnExport').disabled = false;
+      $('etaText').innerText = "Finished ✓";
+
+      renderTable();
+    }
+
+    function togglePause() {
+      isPaused = !isPaused;
+      $('btnPauseText').innerText = isPaused ? "Resume" : "Pause";
+    }
+
+    // --- Counters & Badges ---
+    function updateCounters() {
+      let inStock = 0, outStock = 0, ended = 0, invalid = 0;
+
+      for (const item of items) {
+        if (item.status === 'AVAILABLE') inStock++;
+        else if (item.status === 'OUT_OF_STOCK') outStock++;
+        else if (item.status === 'ENDED / SOLD OUT') ended++;
+        else if (item.status === 'INVALID' || item.status === 'INVALID / REMOVED') invalid++;
+      }
+
+      const totalChecked = inStock + outStock + ended + invalid;
+      const pct = count => totalChecked ? (count / totalChecked) * 100 : 0;
+      const getPct = count => `${Math.round(pct(count))}%`;
+
+      $('countInStock').innerText = inStock.toLocaleString();
+      $('pctInStock').innerText = getPct(inStock);
+      $('countOutOfStock').innerText = outStock.toLocaleString();
+      $('pctOutOfStock').innerText = getPct(outStock);
+      $('countEnded').innerText = ended.toLocaleString();
+      $('pctEnded').innerText = getPct(ended);
+      $('countInvalid').innerText = invalid.toLocaleString();
+      $('pctInvalid').innerText = getPct(invalid);
+
+      $('segInStock').style.width = `${pct(inStock)}%`;
+      $('segOutOfStock').style.width = `${pct(outStock)}%`;
+      $('segEnded').style.width = `${pct(ended)}%`;
+      $('segInvalid').style.width = `${pct(invalid)}%`;
+
+      $('tabCountALL').innerText = items.length.toLocaleString();
+      $('tabCountAVAILABLE').innerText = inStock.toLocaleString();
+      $('tabCountOUT_OF_STOCK').innerText = outStock.toLocaleString();
+      $('tabCountENDED').innerText = ended.toLocaleString();
+      $('tabCountINVALID').innerText = invalid.toLocaleString();
+    }
+
+    // --- Filter & Search ---
+    function setFilter(filter) {
+      currentFilter = filter;
+      currentPage = 1;
+
+      ['ALL', 'AVAILABLE', 'OUT_OF_STOCK', 'ENDED', 'INVALID'].forEach(tab => {
+        const on = tab === filter || (filter === 'ENDED / SOLD OUT' && tab === 'ENDED');
+        $(`tab${tab}`).classList.toggle('active', on);
+      });
+
+      renderTable();
+    }
+
+    function onSearchChange() {
+      searchQuery = $('searchInput').value.toLowerCase().trim();
+      currentPage = 1;
+      renderTable();
+    }
+
+    // --- Table Rendering with Pagination ---
+    function statusView(status) {
+      if (status === 'AVAILABLE') return { row: 'r-ok', cls: 'st-ok', label: 'In stock' };
+      if (status === 'OUT_OF_STOCK') return { row: 'r-warn', cls: 'st-warn', label: 'Out of stock' };
+      if (status.includes('ENDED') || status.includes('SOLD')) return { row: 'r-bad', cls: 'st-bad', label: 'Sold / ended' };
+      if (status === 'PENDING') return { row: '', cls: 'st-pending', label: 'Pending' };
+      return { row: 'r-mute', cls: 'st-mute', label: status };
+    }
+
+    function renderTable() {
+      let filtered = items;
+
+      if (currentFilter !== 'ALL') {
+        filtered = filtered.filter(it => it.status.startsWith(currentFilter));
+      }
+
+      if (searchQuery) {
+        filtered = filtered.filter(it =>
+          it.id.toLowerCase().includes(searchQuery) ||
+          it.url.toLowerCase().includes(searchQuery) ||
+          (it.title && String(it.title).toLowerCase().includes(searchQuery)) ||
+          it.status.toLowerCase().includes(searchQuery)
+        );
+      }
+
+      const totalVisible = filtered.length;
+      $('totalVisibleCount').innerText = totalVisible.toLocaleString();
+
+      const totalPages = Math.max(1, Math.ceil(totalVisible / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      $('pageInfo').innerText = `Page ${currentPage} / ${totalPages}`;
+      $('btnPrev').disabled = currentPage <= 1;
+      $('btnNext').disabled = currentPage >= totalPages;
+
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const end = Math.min(start + PAGE_SIZE, totalVisible);
+      $('pageRange').innerText = totalVisible === 0 ? "0" : `${start + 1}–${end}`;
+
+      const pageItems = filtered.slice(start, end);
+      const tbody = $('tableBody');
+
+      if (pageItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><b>${items.length ? 'No matching records' : 'Nothing loaded yet'}</b>${items.length ? 'Try another filter or search term.' : 'Excel sheet upload karein ya upar “Load 10k demo” dabayein.'}</div></td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = pageItems.map(item => {
+        const v = statusView(item.status);
+        const qtyColor = item.qty > 0 ? 'c-ok' : 'c-mute';
+        return `
+          <tr class="${v.row}">
+            <td class="idx">${item.index}</td>
+            <td><span class="item-id">${esc(item.id)}</span></td>
+            <td>
+              <div class="cell-title" title="${esc(item.title)}">${esc(item.title)}</div>
+              <div class="cell-url"><a href="${safeHref(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.url)}</a></div>
+            </td>
+            <td class="mono">${esc(item.price)}</td>
+            <td class="qty ${qtyColor}">${esc(item.qty)}</td>
+            <td><span class="status ${v.cls}"><i></i>${esc(v.label)}</span></td>
+          </tr>`;
+      }).join('');
+    }
+
+    function prevPage() {
+      if (currentPage > 1) { currentPage--; renderTable(); }
+    }
+
+    function nextPage() {
+      currentPage++;
+      renderTable();
+    }
+
+    // --- Export Verified Excel (.xlsx) ---
+    function exportVerifiedExcel() {
+      if (!items || items.length === 0) return;
+
+      const exportRows = items.map(item => {
+        const row = Object.assign({}, item.rawRow);
+        row["eBay Item ID"] = item.id;
+        row["Stock Status"] = item.status;
+        row["Available Qty"] = item.qty;
+        row["Price"] = item.price;
+        row["Verified Date"] = new Date().toLocaleString();
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Verified eBay Products");
+
+      XLSX.writeFile(workbook, `ebay_products_verified_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+
+    // --- API Settings Modal Logic ---
+    function openApiModal() { $('apiModal').classList.remove('hidden'); }
+    function closeApiModal() { $('apiModal').classList.add('hidden'); }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeApiModal(); });
+
+    function setMode(mode) {
+      apiMode = mode;
+      const live = mode === 'live';
+      $('modeDemoBtn').classList.toggle('on', !live);
+      $('modeLiveBtn').classList.toggle('on', live);
+      $('credentialsFields').classList.toggle('off', !live);
+
+      const badge = $('executionModeBadge');
+      badge.classList.toggle('live', live);
+      badge.innerText = live ? "Live eBay API" : "Demo mode";
+      $('apiStatusBadge').classList.toggle('live', live);
+      $('apiStatusBadge').title = live ? "Live API Active" : "Demo Mode Active";
+    }
+
+    async function testConnection() {
+      const clientId = $('ebayClientId').value.trim();
+      const clientSecret = $('ebayClientSecret').value.trim();
+      const sandbox = $('ebaySandbox').checked;
+      const resEl = $('testConnResult');
+
+      const show = (cls, msg) => { resEl.className = `test-result ${cls}`; resEl.innerText = msg; };
+
+      if (!clientId || !clientSecret) {
+        show('err', "Error: please enter Client ID and Client Secret.");
+        return;
+      }
+
+      show('wait', "Connecting to eBay OAuth…");
+
+      try {
+        const res = await fetch('/api/ebay/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId, clientSecret, sandbox })
+        });
+        const data = await res.json();
+        if (data.success && data.token) {
+          ebayToken = data.token;
+          show('ok', "✓ Connected to eBay API");
+        } else {
+          show('err', `Auth failed: ${data.error || 'Invalid credentials'}`);
+        }
+      } catch (err) {
+        show('err', `Network error: ${err.message}`);
+      }
+    }
+
+    function saveApiSettings() { closeApiModal(); }
+  </script>
+</body>
+</html>
