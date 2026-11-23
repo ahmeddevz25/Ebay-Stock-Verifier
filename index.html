@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stockline AI — Enterprise eBay Stock & Inventory Verifier</title>
-  <meta name="color-scheme" content="light dark">
+  <title>eBay Stock Verifier</title>
+  <meta name="color-scheme" content="dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -16,22 +16,15 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['Geist', 'sans-serif'],
+            sans: ['Geist', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
             mono: ['"Geist Mono"', 'monospace']
-          },
-          colors: {
-            brand: {
-              50: '#f0fdf4',
-              500: '#22c55e',
-              600: '#16a34a'
-            }
           }
         }
       }
     }
   </script>
 </head>
-<body class="bg-slate-950 text-slate-100 antialiased font-sans min-h-screen selection:bg-emerald-500 selection:text-black">
+<body class="bg-[#090d16] text-slate-100 antialiased font-sans min-h-screen">
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
 </body>
