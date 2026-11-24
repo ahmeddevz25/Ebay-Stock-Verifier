@@ -23,7 +23,9 @@ import {
   Sparkles,
   Info,
   CheckCheck,
-  X
+  X,
+  ShieldCheck,
+  Key
 } from 'lucide-react';
 
 const EBAY_ID_REGEX = /(?:itm\/(?:[^\/]+\/)?|ebay\.com\/p\/|item=)(\d{9,14})/;
@@ -61,13 +63,20 @@ export default function App() {
   const pageSize = 20;
   const [copiedId, setCopiedId] = useState(null);
 
-  // Settings Modal
+  // Settings & Credentials (reads from localStorage or safe .env.local)
   const [showSettings, setShowSettings] = useState(false);
-  const [apiMode, setApiMode] = useState('demo'); // 'demo' | 'live'
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [sandbox, setSandbox] = useState(false);
+  const [apiMode, setApiMode] = useState(() => localStorage.getItem('ebay_api_mode') || 'live');
+  const [clientId, setClientId] = useState(() => localStorage.getItem('ebay_client_id') || import.meta.env.VITE_EBAY_CLIENT_ID || '');
+  const [clientSecret, setClientSecret] = useState(() => localStorage.getItem('ebay_client_secret') || import.meta.env.VITE_EBAY_CLIENT_SECRET || '');
+  const [devId, setDevId] = useState(() => localStorage.getItem('ebay_dev_id') || import.meta.env.VITE_EBAY_DEV_ID || '');
+  const [sandbox, setSandbox] = useState(() => {
+    const saved = localStorage.getItem('ebay_sandbox');
+    if (saved !== null) return saved === 'true';
+    return import.meta.env.VITE_EBAY_SANDBOX !== 'false';
+  });
   const [ebayToken, setEbayToken] = useState(null);
+  const [connStatus, setConnStatus] = useState(null); // { type: 'success'|'error'|'loading', message: string }
+  const [isTestingConn, setIsTestingConn] = useState(false);
 
   // Export dropdown
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -90,6 +99,47 @@ export default function App() {
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  // Persist settings changes
+  const saveCredentials = (mode = apiMode, cid = clientId, secret = clientSecret, sbx = sandbox, dev = devId) => {
+    localStorage.setItem('ebay_api_mode', mode);
+    localStorage.setItem('ebay_client_id', cid);
+    localStorage.setItem('ebay_client_secret', secret);
+    localStorage.setItem('ebay_sandbox', sbx ? 'true' : 'false');
+    localStorage.setItem('ebay_dev_id', dev);
+  };
+
+  // Test eBay Connection & Fetch Token
+  const testConnection = async () => {
+    setIsTestingConn(true);
+    setConnStatus({ type: 'loading', message: 'Connecting to eBay OAuth API...' });
+
+    try {
+      const res = await fetch('/api/ebay/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, clientSecret, sandbox })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      setEbayToken(data.token);
+      saveCredentials();
+      setConnStatus({
+        type: 'success',
+        message: `Connected successfully! OAuth token generated for ${sandbox ? 'Sandbox' : 'Production'}.`
+      });
+      return data.token;
+    } catch (err) {
+      setConnStatus({ type: 'error', message: err.message });
+      return null;
+    } finally {
+      setIsTestingConn(false);
+    }
+  };
 
   // Excel File Upload Parser
   const handleFileUpload = useCallback((file) => {
@@ -211,6 +261,18 @@ export default function App() {
   const startVerification = async () => {
     if (items.length === 0) return;
 
+    let activeToken = ebayToken;
+
+    // In live mode, ensure we have an OAuth token
+    if (apiMode === 'live' && !activeToken) {
+      activeToken = await testConnection();
+      if (!activeToken) {
+        alert('Could not authenticate with eBay. Please check your credentials in the API Settings.');
+        setShowSettings(true);
+        return;
+      }
+    }
+
     isRunningRef.current = true;
     isPausedRef.current = false;
     setIsRunning(true);
@@ -235,7 +297,8 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             itemIds,
-            token: ebayToken,
+            token: activeToken,
+            sandbox,
             demoMode: apiMode === 'demo'
           })
         });
@@ -462,9 +525,10 @@ export default function App() {
               className="px-3.5 py-2 rounded-lg border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-xs sm:text-sm text-slate-300 flex items-center gap-2 transition"
             >
               <Settings className="w-4 h-4 text-slate-400" />
-              <span className="hidden sm:inline font-medium">API</span>
+              <span className="hidden sm:inline font-medium">eBay Keys</span>
               <span
-                className={`w-2 h-2 rounded-full ${apiMode === 'live' ? 'bg-blue-400' : 'bg-emerald-400'}`}
+                className={`w-2 h-2 rounded-full ${ebayToken ? 'bg-emerald-400' : apiMode === 'live' ? 'bg-amber-400' : 'bg-slate-400'}`}
+                title={ebayToken ? 'Authenticated with eBay' : 'Configured'}
               />
             </button>
           </div>
@@ -916,19 +980,22 @@ export default function App() {
       {/* Settings Modal */}
       <AnimatePresence>
         {showSettings && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
-              className="bg-[#0f1422] border border-white/10 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative"
+              className="bg-[#0f1422] border border-white/10 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative"
             >
               <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <Settings className="w-4 h-4" />
+                    <Key className="w-4 h-4" />
                   </div>
-                  <h3 className="text-base font-semibold text-white">eBay API Configuration</h3>
+                  <div>
+                    <h3 className="text-base font-semibold text-white">eBay Developer API Credentials</h3>
+                    <p className="text-xs text-slate-400">Configure keys for automated live stock verification</p>
+                  </div>
                 </div>
                 <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
                   <X className="w-5 h-5" />
@@ -941,7 +1008,10 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-2.5">
                     <button
                       type="button"
-                      onClick={() => setApiMode('demo')}
+                      onClick={() => {
+                        setApiMode('demo');
+                        saveCredentials('demo');
+                      }}
                       className={`py-2.5 px-3 rounded-lg border font-medium transition ${
                         apiMode === 'demo'
                           ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
@@ -952,7 +1022,10 @@ export default function App() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setApiMode('live')}
+                      onClick={() => {
+                        setApiMode('live');
+                        saveCredentials('live');
+                      }}
                       className={`py-2.5 px-3 rounded-lg border font-medium transition ${
                         apiMode === 'live'
                           ? 'border-blue-500/50 bg-blue-500/10 text-blue-400'
@@ -964,29 +1037,48 @@ export default function App() {
                   </div>
                 </div>
 
-                {apiMode === 'live' && (
-                  <div className="space-y-3.5 pt-1">
-                    <div>
-                      <label className="block text-slate-200 font-medium mb-1">Client ID (App ID)</label>
-                      <input
-                        type="text"
-                        value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
-                        placeholder="Your eBay Client ID"
-                        className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-200 font-medium mb-1">Client Secret (Cert ID)</label>
-                      <input
-                        type="password"
-                        value={clientSecret}
-                        onChange={(e) => setClientSecret(e.target.value)}
-                        placeholder="Your eBay Client Secret"
-                        className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-sm"
-                      />
-                    </div>
-                    <label className="flex items-center gap-2.5 cursor-pointer text-slate-200 pt-1">
+                <div className="space-y-3.5 pt-1">
+                  <div>
+                    <label className="block text-slate-200 font-medium mb-1">
+                      App ID (Client ID)
+                    </label>
+                    <input
+                      type="text"
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                      placeholder="e.g. Muhammad-ICRW-SBX-..."
+                      className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-xs sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-200 font-medium mb-1">
+                      Cert ID (Client Secret)
+                    </label>
+                    <input
+                      type="password"
+                      value={clientSecret}
+                      onChange={(e) => setClientSecret(e.target.value)}
+                      placeholder="e.g. SBX-0967f55..."
+                      className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-xs sm:text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1 text-xs">
+                      Dev ID (Optional Reference)
+                    </label>
+                    <input
+                      type="text"
+                      value={devId}
+                      onChange={(e) => setDevId(e.target.value)}
+                      placeholder="e.g. 4717b32b-..."
+                      className="w-full bg-black/30 border border-white/5 rounded-lg px-3 py-1.5 text-slate-400 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <label className="flex items-center gap-2.5 cursor-pointer text-slate-200">
                       <input
                         type="checkbox"
                         checked={sandbox}
@@ -995,23 +1087,77 @@ export default function App() {
                       />
                       <span className="text-sm">Use Sandbox Environment</span>
                     </label>
+
+                    {sandbox && (
+                      <span className="text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                        Sandbox Mode Active
+                      </span>
+                    )}
                   </div>
-                )}
+
+                  {/* Informational Note about Sandbox vs Production */}
+                  <div className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-3 text-xs text-slate-300 space-y-1">
+                    <div className="flex items-center gap-1.5 text-amber-300 font-medium">
+                      <Info className="w-3.5 h-3.5" />
+                      <span>Sandbox vs Production Keys:</span>
+                    </div>
+                    <p className="text-slate-400 leading-relaxed">
+                      Sandbox keys verify listings inside eBay's test sandbox. To verify real, live products from <code className="text-slate-200">ebay.com</code>, generate a <strong>Production Keyset</strong> on the eBay Developer portal.
+                    </p>
+                  </div>
+
+                  {/* Connection Test Status Message */}
+                  {connStatus && (
+                    <div
+                      className={`p-3 rounded-lg text-xs font-medium flex items-center gap-2 ${
+                        connStatus.type === 'success'
+                          ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                          : connStatus.type === 'error'
+                          ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+                          : 'bg-blue-500/10 border border-blue-500/20 text-blue-400'
+                      }`}
+                    >
+                      {connStatus.type === 'success' ? (
+                        <ShieldCheck className="w-4 h-4 shrink-0" />
+                      ) : connStatus.type === 'error' ? (
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <Zap className="w-4 h-4 shrink-0 animate-pulse" />
+                      )}
+                      <span>{connStatus.message}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="pt-3 border-t border-white/[0.08] flex justify-end gap-2.5">
+              <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between">
                 <button
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 rounded-lg border border-white/10 text-sm text-slate-300 hover:bg-white/[0.04]"
+                  type="button"
+                  onClick={testConnection}
+                  disabled={isTestingConn || !clientId || !clientSecret}
+                  className="px-3.5 py-2 rounded-lg border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.06] disabled:opacity-40 text-xs sm:text-sm text-slate-200 font-medium transition flex items-center gap-1.5"
                 >
-                  Close
+                  <Zap className={`w-3.5 h-3.5 ${isTestingConn ? 'animate-pulse text-amber-400' : 'text-emerald-400'}`} />
+                  <span>{isTestingConn ? 'Testing...' : 'Test Connection'}</span>
                 </button>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm text-white font-medium"
-                >
-                  Save
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-slate-300 hover:bg-white/[0.04]"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      saveCredentials();
+                      setShowSettings(false);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm text-white font-medium"
+                  >
+                    Save Keys
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
