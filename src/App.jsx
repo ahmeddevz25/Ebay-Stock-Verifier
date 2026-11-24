@@ -66,13 +66,21 @@ export default function App() {
   // Settings & Credentials (reads from localStorage or safe .env.local)
   const [showSettings, setShowSettings] = useState(false);
   const [apiMode, setApiMode] = useState(() => localStorage.getItem('ebay_api_mode') || 'live');
-  const [clientId, setClientId] = useState(() => localStorage.getItem('ebay_client_id') || import.meta.env.VITE_EBAY_CLIENT_ID || '');
-  const [clientSecret, setClientSecret] = useState(() => localStorage.getItem('ebay_client_secret') || import.meta.env.VITE_EBAY_CLIENT_SECRET || '');
-  const [devId, setDevId] = useState(() => localStorage.getItem('ebay_dev_id') || import.meta.env.VITE_EBAY_DEV_ID || '');
+  const [clientId, setClientId] = useState(() => {
+    return import.meta.env.VITE_EBAY_CLIENT_ID || localStorage.getItem('ebay_client_id') || '';
+  });
+  const [clientSecret, setClientSecret] = useState(() => {
+    return import.meta.env.VITE_EBAY_CLIENT_SECRET || localStorage.getItem('ebay_client_secret') || '';
+  });
+  const [devId, setDevId] = useState(() => {
+    return import.meta.env.VITE_EBAY_DEV_ID || localStorage.getItem('ebay_dev_id') || '';
+  });
   const [sandbox, setSandbox] = useState(() => {
+    if (import.meta.env.VITE_EBAY_SANDBOX !== undefined) {
+      return import.meta.env.VITE_EBAY_SANDBOX === 'true';
+    }
     const saved = localStorage.getItem('ebay_sandbox');
-    if (saved !== null) return saved === 'true';
-    return import.meta.env.VITE_EBAY_SANDBOX !== 'false';
+    return saved === 'true';
   });
   const [ebayToken, setEbayToken] = useState(null);
   const [connStatus, setConnStatus] = useState(null); // { type: 'success'|'error'|'loading', message: string }
@@ -134,7 +142,11 @@ export default function App() {
       });
       return data.token;
     } catch (err) {
-      setConnStatus({ type: 'error', message: err.message });
+      let msg = err.message;
+      if (msg.includes('invalid_client')) {
+        msg = 'eBay returned 401 (invalid_client): eBay requires completing the "Marketplace Account Deletion" opt-out on the developer portal before new Production keys are activated.';
+      }
+      setConnStatus({ type: 'error', message: msg });
       return null;
     } finally {
       setIsTestingConn(false);
@@ -267,7 +279,6 @@ export default function App() {
     if (apiMode === 'live' && !activeToken) {
       activeToken = await testConnection();
       if (!activeToken) {
-        alert('Could not authenticate with eBay. Please check your credentials in the API Settings.');
         setShowSettings(true);
         return;
       }
@@ -1096,13 +1107,13 @@ export default function App() {
                   </div>
 
                   {/* Informational Note about Sandbox vs Production */}
-                  <div className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-3 text-xs text-slate-300 space-y-1">
-                    <div className="flex items-center gap-1.5 text-amber-300 font-medium">
+                  <div className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-3 text-xs text-slate-300 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
                       <Info className="w-3.5 h-3.5" />
-                      <span>Sandbox vs Production Keys:</span>
+                      <span>eBay Production Activation:</span>
                     </div>
                     <p className="text-slate-400 leading-relaxed">
-                      Sandbox keys verify listings inside eBay's test sandbox. To verify real, live products from <code className="text-slate-200">ebay.com</code>, generate a <strong>Production Keyset</strong> on the eBay Developer portal.
+                      If eBay returns <code className="text-amber-400">401 (invalid_client)</code>: On your eBay Developer portal, click <strong className="text-white">"View all application keys"</strong>, locate <strong className="text-white">"Marketplace Account Deletion"</strong> and toggle <strong className="text-emerald-400">"Not persisting eBay data"</strong> to ON (Opt-Out).
                     </p>
                   </div>
 
