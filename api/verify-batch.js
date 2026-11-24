@@ -1,5 +1,5 @@
-// api/verify-batch.js - Live eBay Browse API Verification
-const { getEbayToken, DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET } = require('./auth.js');
+// api/verify-batch.js - Live eBay Browse API Verification (ESM)
+import { getEbayToken, DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET } from './auth.js';
 
 async function checkSingleItem(itemId, token, sandbox = false) {
   const host = sandbox ? 'api.sandbox.ebay.com' : 'api.ebay.com';
@@ -77,7 +77,7 @@ async function checkSingleItem(itemId, token, sandbox = false) {
   }
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -86,7 +86,17 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    let body = req.body;
+    if (!body && req.on) {
+      const buffers = [];
+      for await (const chunk of req) buffers.push(chunk);
+      try { body = JSON.parse(Buffer.concat(buffers).toString()); } catch (e) { body = {}; }
+    } else if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) { body = {}; }
+    } else {
+      body = body || {};
+    }
+
     const { itemIds, token, sandbox, demoMode } = body;
 
     if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -113,7 +123,7 @@ module.exports = async (req, res) => {
     // Acquire or use real eBay access token
     let activeToken = token;
     if (!activeToken) {
-      activeToken = await getEbayToken(DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, !!sandbox);
+      activeToken = await getEbayToken(null, null, !!sandbox);
     }
 
     // Query items in parallel
@@ -130,4 +140,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
-};
+}
