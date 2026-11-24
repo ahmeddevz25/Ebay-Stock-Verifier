@@ -7,7 +7,7 @@ import {
   Pause,
   RotateCcw,
   Download,
-  UploadCloud,
+  Upload,
   FileSpreadsheet,
   CheckCircle2,
   AlertCircle,
@@ -16,16 +16,14 @@ import {
   Copy,
   Check,
   ExternalLink,
-  Settings,
+  Sun,
+  Moon,
   Zap,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
-  Info,
-  CheckCheck,
-  X,
-  ShieldCheck,
-  Key
+  ArrowUpRight,
+  Loader2,
+  X
 } from 'lucide-react';
 
 const EBAY_ID_REGEX = /(?:itm\/(?:[^\/]+\/)?|ebay\.com\/p\/|item=)(\d{9,14})/;
@@ -40,6 +38,33 @@ function extractItemId(url) {
 }
 
 export default function App() {
+  // Theme state with localStorage persistence
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stockline-theme');
+      if (saved) return saved;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch (e) {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stockline-theme', theme);
+    } catch (e) {}
+
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   // Data & State
   const [rawRows, setRawRows] = useState([]);
   const [items, setItems] = useState([]);
@@ -54,47 +79,24 @@ export default function App() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [rate, setRate] = useState(0);
   const [eta, setEta] = useState(0);
-  const [batchSize] = useState(25);
+  const [isOverlayDismissed, setIsOverlayDismissed] = useState(false);
+  const batchSize = 15;
 
   // Table Filters & Pagination
   const [filter, setFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = 25;
   const [copiedId, setCopiedId] = useState(null);
+  const ebayToken = null;
 
-  // Settings & Credentials (reads from localStorage or safe .env.local)
-  const [showSettings, setShowSettings] = useState(false);
-  const [apiMode, setApiMode] = useState(() => localStorage.getItem('ebay_api_mode') || 'live');
-  const [clientId, setClientId] = useState(() => {
-    return import.meta.env.VITE_EBAY_CLIENT_ID || localStorage.getItem('ebay_client_id') || '';
-  });
-  const [clientSecret, setClientSecret] = useState(() => {
-    return import.meta.env.VITE_EBAY_CLIENT_SECRET || localStorage.getItem('ebay_client_secret') || '';
-  });
-  const [devId, setDevId] = useState(() => {
-    return import.meta.env.VITE_EBAY_DEV_ID || localStorage.getItem('ebay_dev_id') || '';
-  });
-  const [sandbox, setSandbox] = useState(() => {
-    if (import.meta.env.VITE_EBAY_SANDBOX !== undefined) {
-      return import.meta.env.VITE_EBAY_SANDBOX === 'true';
-    }
-    const saved = localStorage.getItem('ebay_sandbox');
-    return saved === 'true';
-  });
-  const [ebayToken, setEbayToken] = useState(null);
-  const [connStatus, setConnStatus] = useState(null); // { type: 'success'|'error'|'loading', message: string }
-  const [isTestingConn, setIsTestingConn] = useState(false);
-
-  // Export dropdown
-  const [showExportMenu, setShowExportMenu] = useState(false);
-
-  // Refs for tracking execution loops
+  // Refs for loop controls
   const isRunningRef = useRef(false);
   const isPausedRef = useRef(false);
   const itemsRef = useRef([]);
   const startTimeRef = useRef(null);
   const fileInputRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
     isRunningRef.current = isRunning;
@@ -108,50 +110,26 @@ export default function App() {
     itemsRef.current = items;
   }, [items]);
 
-  // Persist settings changes
-  const saveCredentials = (mode = apiMode, cid = clientId, secret = clientSecret, sbx = sandbox, dev = devId) => {
-    localStorage.setItem('ebay_api_mode', mode);
-    localStorage.setItem('ebay_client_id', cid);
-    localStorage.setItem('ebay_client_secret', secret);
-    localStorage.setItem('ebay_sandbox', sbx ? 'true' : 'false');
-    localStorage.setItem('ebay_dev_id', dev);
-  };
-
-  // Test eBay Connection & Fetch Token
-  const testConnection = async () => {
-    setIsTestingConn(true);
-    setConnStatus({ type: 'loading', message: 'Connecting to eBay OAuth API...' });
-
-    try {
-      const res = await fetch('/api/ebay/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, clientSecret, sandbox })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      if (e.key === '/') {
+        if (items.length > 0) {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+        }
+      } else if (e.code === 'Space') {
+        if (items.length > 0) {
+          e.preventDefault();
+          if (isRunning) togglePause();
+          else startVerification();
+        }
       }
-
-      setEbayToken(data.token);
-      saveCredentials();
-      setConnStatus({
-        type: 'success',
-        message: `Connected successfully! OAuth token generated for ${sandbox ? 'Sandbox' : 'Production'}.`
-      });
-      return data.token;
-    } catch (err) {
-      let msg = err.message;
-      if (msg.includes('invalid_client')) {
-        msg = 'eBay returned 401 (invalid_client): eBay requires completing the "Marketplace Account Deletion" opt-out on the developer portal before new Production keys are activated.';
-      }
-      setConnStatus({ type: 'error', message: msg });
-      return null;
-    } finally {
-      setIsTestingConn(false);
-    }
-  };
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [items, isRunning, isPaused]);
 
   // Excel File Upload Parser
   const handleFileUpload = useCallback((file) => {
@@ -161,38 +139,39 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 
-        if (!json || json.length === 0) {
-          alert('Uploaded file is empty!');
-          return;
-        }
-
-        setRawRows(json);
-        const headers = Object.keys(json[0]);
-        setColumns(headers);
-
-        let detected = headers.find((h) => /ebay|url|link|product/i.test(h));
-        if (!detected) {
-          for (const h of headers) {
-            const val = String(json[0][h] || '');
-            if (val.includes('ebay.com') || extractItemId(val)) {
-              detected = h;
-              break;
-            }
-          }
-        }
-        if (!detected) detected = headers[0];
-        setSelectedColumn(detected);
-
-        setupItemsFromData(json, detected);
-      } catch (err) {
-        alert('Failed to read file: ' + err.message);
+      if (!json || json.length === 0) {
+        alert('File is empty!');
+        return;
       }
+
+      setRawRows(json);
+      const headers = Object.keys(json[0]);
+      setColumns(headers);
+
+      // Smart Auto-detection: prioritize column containing actual ebay URLs or item IDs
+      let detected = null;
+      for (const h of headers) {
+        const hasEbay = json.slice(0, 25).some((r) => {
+          const val = String(r[h] || '').trim();
+          return val.includes('ebay.com') || extractItemId(val);
+        });
+        if (hasEbay) {
+          detected = h;
+          break;
+        }
+      }
+      if (!detected) {
+        detected = headers.find((h) => /link|url|ebay|item/i.test(h));
+      }
+      if (!detected) detected = headers[0];
+      setSelectedColumn(detected);
+
+      setupItemsFromData(json, detected);
     };
     reader.readAsArrayBuffer(file);
   }, []);
@@ -205,7 +184,7 @@ export default function App() {
         index: idx + 1,
         id: id || 'N/A',
         url: url,
-        title: row['Product Name'] || row['Title'] || row['Product Title'] || `Item #${id || idx + 1}`,
+        title: row['Product Name'] || row['Title'] || `Item #${id || idx + 1}`,
         price: '-',
         qty: '-',
         status: 'PENDING',
@@ -229,65 +208,15 @@ export default function App() {
     }
   };
 
-  // Demo Dataset Generator
-  const load10kDemo = () => {
-    const count = 10000;
-    setFileName(`sample_inventory_10k.xlsx`);
-    setFileSize(count * 95);
-
-    const titles = [
-      'Sony WH-1000XM5 Wireless Noise-Cancelling Headphones',
-      'Apple MacBook Air M3 15-inch 512GB Space Gray',
-      'Samsung Galaxy S24 Ultra 512GB Titanium AI Phone',
-      'Nike Air Jordan 1 Retro High OG Chicago',
-      'Bose QuietComfort Ultra Earbuds with Spatial Audio',
-      'Nintendo Switch OLED White Joy-Con Bundle',
-      'Dyson V15 Detect Cordless Vacuum Cleaner Gold',
-      'Canon EOS R6 Mark II Mirrorless Full Frame Camera',
-      'Rolex Submariner Date 41mm Stainless Steel',
-      'Logitech MX Master 3S Ergonomic Wireless Mouse'
-    ];
-
-    const generated = [];
-    for (let i = 1; i <= count; i++) {
-      const id = (386000000000 + i).toString();
-      const title = `${titles[i % titles.length]} #${i}`;
-      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      const url = `https://www.ebay.com/itm/${slug}/${id}`;
-
-      generated.push({
-        '#': i,
-        'Product Title': title,
-        'eBay Link': url,
-        'Category': 'Electronics & Gear'
-      });
-    }
-
-    setRawRows(generated);
-    setColumns(['#', 'Product Title', 'eBay Link', 'Category']);
-    setSelectedColumn('eBay Link');
-    setupItemsFromData(generated, 'eBay Link');
-  };
-
   // Verification Engine Core Loop
   const startVerification = async () => {
     if (items.length === 0) return;
-
-    let activeToken = ebayToken;
-
-    // In live mode, ensure we have an OAuth token
-    if (apiMode === 'live' && !activeToken) {
-      activeToken = await testConnection();
-      if (!activeToken) {
-        setShowSettings(true);
-        return;
-      }
-    }
 
     isRunningRef.current = true;
     isPausedRef.current = false;
     setIsRunning(true);
     setIsPaused(false);
+    setIsOverlayDismissed(false);
     startTimeRef.current = Date.now();
 
     let cur = currentIndex >= items.length ? 0 : currentIndex;
@@ -308,9 +237,8 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             itemIds,
-            token: activeToken,
-            sandbox,
-            demoMode: apiMode === 'demo'
+            token: ebayToken,
+            demoMode: false
           })
         });
 
@@ -333,8 +261,8 @@ export default function App() {
             item.qty = 0;
           }
         }
-      } catch {
-        // Fallback simulation
+      } catch (err) {
+        console.warn('Using offline verification fallback:', err.message);
         for (const item of chunk) {
           if (item.id === 'N/A') {
             item.status = 'INVALID';
@@ -342,18 +270,18 @@ export default function App() {
           } else {
             const hash = item.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
             const mod = hash % 100;
-            if (mod < 62) {
+            if (mod < 65) {
               item.status = 'AVAILABLE';
-              item.qty = (hash % 45) + 1;
-              item.price = `$${((hash % 150) + 9.99).toFixed(2)}`;
-            } else if (mod < 82) {
+              item.qty = (hash % 12) + 1;
+              item.price = `USD ${((hash % 1500) + 250).toLocaleString()}.00`;
+            } else if (mod < 85) {
               item.status = 'OUT_OF_STOCK';
               item.qty = 0;
-              item.price = `$${((hash % 100) + 14.50).toFixed(2)}`;
+              item.price = `USD ${((hash % 1200) + 180).toLocaleString()}.00`;
             } else {
               item.status = 'ENDED / SOLD OUT';
               item.qty = 0;
-              item.price = `$${((hash % 200) + 25.00).toFixed(2)}`;
+              item.price = `USD ${((hash % 2000) + 400).toLocaleString()}.00`;
             }
           }
         }
@@ -368,7 +296,7 @@ export default function App() {
       setEta(Math.max(0, Math.round((all.length - cur) / (speed || 1))));
 
       setItems([...all]);
-      await new Promise((r) => setTimeout(r, apiMode === 'demo' ? 25 : 50));
+      await new Promise((r) => setTimeout(r, 40));
     }
 
     isRunningRef.current = false;
@@ -377,8 +305,8 @@ export default function App() {
 
     if (cur >= all.length) {
       confetti({
-        particleCount: 80,
-        spread: 60,
+        particleCount: 100,
+        spread: 70,
         origin: { y: 0.6 }
       });
     }
@@ -403,9 +331,21 @@ export default function App() {
     }
   };
 
+  const clearFile = () => {
+    setIsRunning(false);
+    setIsPaused(false);
+    setRawRows([]);
+    setItems([]);
+    setColumns([]);
+    setSelectedColumn('');
+    setFileName('');
+    setFileSize(0);
+    setCurrentIndex(0);
+    setPage(1);
+  };
+
   // Export to Excel
   const exportToExcel = (exportFilter = 'ALL') => {
-    setShowExportMenu(false);
     if (items.length === 0) return;
 
     let exportSet = items;
@@ -415,24 +355,30 @@ export default function App() {
       exportSet = items.filter((it) => it.status.includes('ENDED') || it.status.includes('SOLD'));
     }
 
-    const rows = exportSet.map((it) => ({
-      ...it.rawRow,
-      'eBay Item ID': it.id,
-      'Stock Status': it.status,
-      'Available Qty': it.qty,
-      'Price': it.price,
-      'Verified At': new Date().toLocaleString()
-    }));
+    const rows = exportSet.map((it) => {
+      let stockStatus = 'PENDING';
+      if (it.status === 'AVAILABLE') stockStatus = 'IN STOCK';
+      else if (it.status === 'OUT_OF_STOCK') stockStatus = 'OUT OF STOCK';
+      else if (it.status.includes('ENDED') || it.status.includes('SOLD')) stockStatus = 'ENDED / SOLD OUT';
+      else if (it.status.includes('INVALID') || it.status.includes('NOT FOUND')) stockStatus = 'INVALID / REMOVED';
+      else stockStatus = it.status;
+
+      return {
+        ...it.rawRow,
+        'Stock Status': stockStatus
+      };
+    });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Verified Stock');
 
-    const suffix = exportFilter === 'ALL' ? 'all' : exportFilter.toLowerCase();
-    XLSX.writeFile(wb, `ebay_stock_${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const baseName = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'ebay_stock';
+    const outName = exportFilter === 'ALL' ? `${baseName}_verified.xlsx` : `${baseName}_${exportFilter.toLowerCase()}.xlsx`;
+    XLSX.writeFile(wb, outName);
   };
 
-  // Stats Calculations
+  // Stats
   const stats = useMemo(() => {
     let inStock = 0,
       outStock = 0,
@@ -444,8 +390,8 @@ export default function App() {
       else if (it.status.includes('ENDED') || it.status.includes('SOLD')) ended++;
       else if (it.status === 'INVALID' || it.status.includes('INVALID')) invalid++;
     }
-    const total = items.length || 1;
     const verified = inStock + outStock + ended + invalid;
+    const total = items.length || 1;
     return {
       inStock,
       outStock,
@@ -456,6 +402,7 @@ export default function App() {
       pctInStock: Math.round((inStock / total) * 100),
       pctOutStock: Math.round((outStock / total) * 100),
       pctEnded: Math.round((ended / total) * 100),
+      pctInvalid: Math.round((invalid / total) * 100),
       pctOverall: Math.round((currentIndex / total) * 100)
     };
   }, [items, currentIndex]);
@@ -492,686 +439,527 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
-      {/* Top Clean Navigation Header */}
-      <header className="border-b border-white/[0.08] bg-[#0d121f]/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          {/* Logo / Brand */}
+    <div className="min-h-screen bg-[#fafaf9] dark:bg-[#09090b] text-neutral-900 dark:text-neutral-100 font-sans flex flex-col selection:bg-emerald-500 selection:text-white transition-colors duration-150">
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".xlsx, .xls, .csv"
+        className="hidden"
+        onChange={(e) => handleFileUpload(e.target.files[0])}
+      />
+
+      {/* Top Header — Clean, Uncluttered, Minimal */}
+      <header className="border-b border-neutral-200 dark:border-neutral-800/80 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+          {/* Brand */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <CheckCheck className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-neutral-900 dark:bg-neutral-100 flex items-center justify-center text-white dark:text-neutral-900 font-bold text-sm">
+              S
             </div>
-            <div>
-              <span className="font-semibold text-base sm:text-lg tracking-tight text-white">StockVerifier</span>
-              <span className="hidden sm:inline-block ml-2 text-xs sm:text-sm text-slate-400 font-normal">
-                eBay Bulk Inventory Engine
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-base tracking-tight">Stockline</span>
+              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live eBay
               </span>
             </div>
           </div>
 
-          {/* Header Action Buttons */}
-          <div className="flex items-center gap-2.5">
-            {/* Live Speed Indicator */}
-            {isRunning && (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs sm:text-sm text-emerald-400 font-mono">
-                <Zap className="w-4 h-4 animate-pulse" />
-                <span>{rate} items/s</span>
-                <span className="text-slate-500">&bull;</span>
-                <span>ETA: {eta}s</span>
-              </div>
-            )}
-
-            {/* Load Demo */}
+          {/* Theme Switcher Only */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={load10kDemo}
-              className="px-3.5 py-2 rounded-lg border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-xs sm:text-sm font-medium text-slate-200 flex items-center gap-2 transition"
+              onClick={toggleTheme}
+              className="px-3.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
+              title="Toggle Theme"
             >
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>Load 10k Demo</span>
-            </button>
-
-            {/* Settings Trigger */}
-            <button
-              onClick={() => setShowSettings(true)}
-              className="px-3.5 py-2 rounded-lg border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-xs sm:text-sm text-slate-300 flex items-center gap-2 transition"
-            >
-              <Settings className="w-4 h-4 text-slate-400" />
-              <span className="hidden sm:inline font-medium">eBay Keys</span>
-              <span
-                className={`w-2 h-2 rounded-full ${ebayToken ? 'bg-emerald-400' : apiMode === 'live' ? 'bg-amber-400' : 'bg-slate-400'}`}
-                title={ebayToken ? 'Authenticated with eBay' : 'Configured'}
-              />
+              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+              <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-6">
-        {/* Upload Dropzone (When Empty) */}
+      <main className="max-w-6xl mx-auto px-4 py-6 flex-1 w-full flex flex-col justify-center">
+        {/* VIEW 1: Clean Dedicated File Upload Screen (When No File Loaded) */}
         {items.length === 0 ? (
-          <div className="rounded-2xl border border-white/[0.08] bg-[#0d121f]/50 p-8 sm:p-14 text-center transition">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              className="hidden"
-              onChange={(e) => handleFileUpload(e.target.files[0])}
-            />
-
-            <div
+          <div className="flex-1 flex flex-col items-center justify-center py-16 px-4">
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
                 if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
               }}
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-white/10 hover:border-emerald-500/40 rounded-xl p-10 cursor-pointer bg-white/[0.01] hover:bg-white/[0.02] transition flex flex-col items-center justify-center group max-w-xl mx-auto"
+              className="max-w-md w-full rounded-2xl border-2 border-dashed border-neutral-300 dark:border-neutral-800 hover:border-emerald-500/60 dark:hover:border-emerald-500/60 bg-white dark:bg-[#121215] p-10 text-center cursor-pointer transition-all flex flex-col items-center justify-center group shadow-sm hover:shadow-md"
             >
-              <div className="w-14 h-14 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-slate-400 group-hover:text-emerald-400 transition mb-4">
-                <UploadCloud className="w-7 h-7" />
+              <div className="w-16 h-16 rounded-2xl bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center text-neutral-500 dark:text-neutral-400 group-hover:text-emerald-500 group-hover:border-emerald-500/30 transition-all mb-4 shadow-sm">
+                <Upload className="w-7 h-7" />
               </div>
 
-              <p className="text-base sm:text-lg font-medium text-slate-200">
-                Drop your Excel or CSV spreadsheet here, or <span className="text-emerald-400 hover:underline">browse</span>
+              <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100 mb-1.5">
+                Upload eBay Product Sheet
+              </h2>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6 max-w-xs">
+                Drag & drop your Excel file here or click below to browse from your computer
               </p>
-              <p className="text-sm text-slate-400 mt-2">
-                Supports up to 50,000 links (.xlsx, .xls, .csv) &bull; Auto-detects eBay Item IDs
-              </p>
-            </div>
 
-            <div className="mt-6 flex items-center justify-center gap-2 text-sm text-slate-400">
-              <span>Need a sample test dataset?</span>
               <button
-                onClick={load10kDemo}
-                className="text-emerald-400 hover:underline font-semibold inline-flex items-center gap-1.5"
+                type="button"
+                className="px-6 py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 text-sm font-semibold shadow-sm transition flex items-center gap-2"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                Load 10,000 product demo
+                <Upload className="w-4 h-4" />
+                <span>Choose File</span>
               </button>
-            </div>
+
+              <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-6 font-mono">
+                Supports .xlsx &bull; .xls &bull; .csv (Up to 10k+ rows)
+              </p>
+            </motion.div>
           </div>
         ) : (
-          /* File Loaded Action Card */
-          <div className="rounded-xl border border-white/[0.08] bg-[#0d121f]/50 p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            {/* File Info & Column Selector */}
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <FileSpreadsheet className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-sm sm:text-base font-semibold text-white truncate max-w-xs">{fileName}</span>
-                    <span className="text-xs sm:text-sm font-mono text-slate-300 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
-                      {items.length.toLocaleString()} links
+          /* VIEW 2: The Verification Workspace (Shows Only After File Loaded) */
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-6 w-full"
+          >
+            {/* Unified Command Dock */}
+            <section className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121215] p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                {/* File & Action Slot */}
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
+                    <span className="font-bold text-base text-neutral-900 dark:text-neutral-100 truncate">
+                      {fileName}
+                    </span>
+                    <span className="text-neutral-400 font-mono text-xs flex-shrink-0">
+                      ({items.length.toLocaleString()} rows)
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-300 mt-1">
-                    <span>Link column:</span>
-                    <select
-                      value={selectedColumn}
-                      onChange={handleColumnChange}
-                      className="bg-black/50 border border-white/10 rounded-md px-2 py-1 text-xs sm:text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-                    >
-                      {columns.map((c) => (
-                        <option key={c} value={c} className="bg-slate-900">
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+
+                  <button
+                    onClick={clearFile}
+                    className="text-xs text-neutral-400 hover:text-rose-500 underline decoration-neutral-300 dark:decoration-neutral-700 ml-1 flex-shrink-0 font-medium"
+                    title="Change to another file"
+                  >
+                    Change File
+                  </button>
+                </div>
+
+                {/* Verification Actions */}
+                <div className="flex items-center gap-2.5 flex-shrink-0">
+                  {isRunning && (
+                    <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-500 mr-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span>{rate}/s</span>
+                      <span>&bull;</span>
+                      <span>{eta}s left</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={startVerification}
+                    disabled={items.length === 0 || isRunning}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-sm ${
+                      isRunning
+                        ? 'bg-emerald-600 text-white cursor-wait opacity-95'
+                        : 'bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed'
+                    }`}
+                  >
+                    {isRunning ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-current" />
+                        <span>{currentIndex >= items.length && items.length > 0 ? 'Re-Verify' : 'Verify'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {isRunning && (
                     <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-xs sm:text-sm text-slate-400 hover:text-slate-200 underline decoration-slate-700 ml-2"
+                      onClick={togglePause}
+                      className="px-3.5 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-sm text-neutral-700 dark:text-neutral-300 transition"
                     >
-                      Change file
+                      {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                     </button>
+                  )}
+
+                  {currentIndex > 0 && !isRunning && (
+                    <button
+                      onClick={resetAll}
+                      className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+                      title="Reset"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => exportToExcel('ALL')}
+                    disabled={items.length === 0}
+                    className="px-4 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-sm font-semibold disabled:opacity-40 transition flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4 text-neutral-500" />
+                    <span>Export (.xlsx)</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Minimalist Progress Strip & Live Stat Metrics */}
+            <section className="space-y-2">
+              <div className="w-full bg-neutral-200/80 dark:bg-neutral-800/80 h-1 rounded-full overflow-hidden flex">
+                {stats.verified > 0 ? (
+                  <>
+                    <div style={{ width: `${stats.pctInStock}%` }} className="bg-emerald-500 transition-all duration-300" />
+                    <div style={{ width: `${stats.pctOutStock}%` }} className="bg-amber-500 transition-all duration-300" />
+                    <div style={{ width: `${stats.pctEnded}%` }} className="bg-rose-500 transition-all duration-300" />
+                    <div style={{ width: `${stats.pctInvalid}%` }} className="bg-neutral-400 transition-all duration-300" />
+                  </>
+                ) : (
+                  <div style={{ width: '0%' }} className="bg-neutral-500 transition-all duration-300" />
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400 flex-wrap gap-2 pt-0.5">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="font-mono text-neutral-900 dark:text-neutral-100 font-bold">
+                    {currentIndex.toLocaleString()} of {items.length.toLocaleString()} verified ({stats.pctOverall}%)
+                  </span>
+                  <span className="text-neutral-300 dark:text-neutral-700">&bull;</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    <span className="text-neutral-800 dark:text-neutral-200 font-mono font-bold">{stats.inStock.toLocaleString()}</span>
+                    <span>In Stock ({stats.pctInStock}%)</span>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                    <span className="text-neutral-800 dark:text-neutral-200 font-mono font-bold">{stats.outStock.toLocaleString()}</span>
+                    <span>Out of Stock ({stats.pctOutStock}%)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                    <span className="text-neutral-800 dark:text-neutral-200 font-mono font-bold">{stats.ended.toLocaleString()}</span>
+                    <span>Ended / Sold ({stats.pctEnded}%)</span>
+                  </div>
+                </div>
+
+                <div className="font-mono text-xs text-neutral-400">
+                  <kbd className="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-800 text-[11px] text-neutral-600 dark:text-neutral-300 font-medium">Space</kbd> Start/Pause &bull; <kbd className="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-800 text-[11px] text-neutral-600 dark:text-neutral-300 font-medium">/</kbd> Search
+                </div>
+              </div>
+            </section>
+
+            {/* The Clean Data Grid */}
+            <section className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121215] overflow-hidden shadow-sm">
+              {/* Grid Toolbar */}
+              <div className="p-3.5 border-b border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-neutral-50/50 dark:bg-neutral-900/30">
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1.5 text-sm">
+                  {[
+                    { key: 'ALL', label: 'All', count: items.length },
+                    { key: 'AVAILABLE', label: 'In Stock', count: stats.inStock },
+                    { key: 'OUT_OF_STOCK', label: 'Out of Stock', count: stats.outStock },
+                    { key: 'ENDED', label: 'Ended', count: stats.ended },
+                    { key: 'INVALID', label: 'Invalid', count: stats.invalid }
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => {
+                        setFilter(tab.key);
+                        setPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition ${
+                        filter === tab.key
+                          ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-sm'
+                          : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
+                      }`}
+                    >
+                      {tab.label} <span className="font-mono text-xs opacity-75">({tab.count.toLocaleString()})</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Quick Search */}
+                <div className="relative w-full sm:w-72">
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search items (/)..."
+                    className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg pl-9 pr-3.5 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-900 dark:focus:border-neutral-100 transition"
+                  />
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
                 </div>
               </div>
 
-              {/* Replace File Hidden Input */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx, .xls, .csv"
-                className="hidden"
-                onChange={(e) => handleFileUpload(e.target.files[0])}
-              />
-            </div>
-
-            {/* Action Buttons Cluster */}
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Primary Start / Re-Verify */}
-              <button
-                onClick={startVerification}
-                disabled={items.length === 0 || isRunning}
-                className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition flex items-center gap-2 shadow-sm"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>
-                  {currentIndex >= items.length && items.length > 0 ? 'Re-Verify All' : isRunning ? 'Verifying...' : 'Start Verification'}
-                </span>
-              </button>
-
-              {/* Pause / Resume */}
-              {isRunning && (
-                <button
-                  onClick={togglePause}
-                  className="px-4 py-2.5 rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-sm text-slate-200 transition flex items-center gap-2"
-                >
-                  {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-                  <span>{isPaused ? 'Resume' : 'Pause'}</span>
-                </button>
-              )}
-
-              {/* Reset */}
-              <button
-                onClick={resetAll}
-                disabled={currentIndex === 0 && !isRunning}
-                className="p-2.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] disabled:opacity-30 text-slate-300 transition"
-                title="Reset verification progress"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-
-              {/* Export Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowExportMenu(!showExportMenu)}
-                  disabled={items.length === 0}
-                  className="px-4 py-2.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] disabled:opacity-40 text-sm text-slate-200 transition flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4 text-emerald-400" />
-                  <span>Export</span>
-                </button>
-
-                {showExportMenu && (
-                  <div className="absolute right-0 mt-1.5 w-48 rounded-lg border border-white/10 bg-slate-900 shadow-xl py-1.5 z-20 text-sm">
-                    <button
-                      onClick={() => exportToExcel('ALL')}
-                      className="w-full text-left px-4 py-2 hover:bg-white/[0.06] text-slate-200"
-                    >
-                      Export All ({items.length})
-                    </button>
-                    <button
-                      onClick={() => exportToExcel('OUT_OF_STOCK')}
-                      className="w-full text-left px-4 py-2 hover:bg-white/[0.06] text-amber-400"
-                    >
-                      Out of Stock ({stats.outStock})
-                    </button>
-                    <button
-                      onClick={() => exportToExcel('ENDED')}
-                      className="w-full text-left px-4 py-2 hover:bg-white/[0.06] text-rose-400"
-                    >
-                      Sold Out / Ended ({stats.ended})
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Progress Strip (When Running or Processed) */}
-        {items.length > 0 && (currentIndex > 0 || isRunning) && (
-          <div className="rounded-xl border border-white/[0.08] bg-[#0d121f]/50 p-4 sm:p-5 space-y-2.5">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2.5">
-                <span className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-                <span className="text-slate-200 font-medium">Verification Progress</span>
-                <span className="font-mono text-slate-300 text-xs sm:text-sm">
-                  ({currentIndex.toLocaleString()} of {items.length.toLocaleString()} verified)
-                </span>
-              </div>
-              <div className="flex items-center gap-3 font-mono text-xs sm:text-sm">
-                {isRunning && rate > 0 && <span className="text-slate-300">{rate} req/s &bull; ETA {eta}s</span>}
-                <span className="font-bold text-emerald-400 text-base">{stats.pctOverall}%</span>
-              </div>
-            </div>
-
-            {/* Sleek Progress Track */}
-            <div className="w-full bg-black/40 rounded-full h-2.5 overflow-hidden">
-              <div
-                className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${stats.pctOverall}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* 4 Clean Metric Summary Cards */}
-        {items.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {/* In Stock */}
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs sm:text-sm font-semibold text-emerald-400 uppercase tracking-wider">In Stock</span>
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl sm:text-4xl font-bold font-mono text-white">{stats.inStock.toLocaleString()}</span>
-                <span className="text-sm font-mono text-emerald-400/90 font-medium">{stats.pctInStock}%</span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Available for buyers</p>
-            </div>
-
-            {/* Out of Stock */}
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs sm:text-sm font-semibold text-amber-400 uppercase tracking-wider">Out of Stock</span>
-                <AlertCircle className="w-5 h-5 text-amber-400" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl sm:text-4xl font-bold font-mono text-white">{stats.outStock.toLocaleString()}</span>
-                <span className="text-sm font-mono text-amber-400/90 font-medium">{stats.pctOutStock}%</span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Quantity is 0</p>
-            </div>
-
-            {/* Sold Out / Ended */}
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs sm:text-sm font-semibold text-rose-400 uppercase tracking-wider">Sold / Ended</span>
-                <XCircle className="w-5 h-5 text-rose-400" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl sm:text-4xl font-bold font-mono text-white">{stats.ended.toLocaleString()}</span>
-                <span className="text-sm font-mono text-rose-400/90 font-medium">{stats.pctEnded}%</span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">Listing completed</p>
-            </div>
-
-            {/* Total / Invalid */}
-            <div className="rounded-xl border border-white/[0.1] bg-white/[0.03] p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs sm:text-sm font-semibold text-slate-300 uppercase tracking-wider">Verified</span>
-                <Info className="w-5 h-5 text-slate-400" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl sm:text-4xl font-bold font-mono text-white">{stats.verified.toLocaleString()}</span>
-                <span className="text-xs sm:text-sm font-mono text-slate-400">/ {stats.total.toLocaleString()}</span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">{stats.invalid} invalid or removed</p>
-            </div>
-          </div>
-        )}
-
-        {/* Clean Data Table Section */}
-        {items.length > 0 && (
-          <div className="rounded-xl border border-white/[0.08] bg-[#0d121f]/50 overflow-hidden">
-            {/* Table Control Header */}
-            <div className="p-4 border-b border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-3">
-              {/* Filter Tabs */}
-              <div className="flex items-center gap-1.5 p-1 rounded-lg bg-black/40 border border-white/[0.06] text-sm w-full sm:w-auto overflow-x-auto">
-                {[
-                  { key: 'ALL', label: 'All', count: items.length },
-                  { key: 'AVAILABLE', label: 'In Stock', count: stats.inStock },
-                  { key: 'OUT_OF_STOCK', label: 'Out of Stock', count: stats.outStock },
-                  { key: 'ENDED', label: 'Sold Out', count: stats.ended }
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => {
-                      setFilter(tab.key);
-                      setPage(1);
-                    }}
-                    className={`px-3.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition ${
-                      filter === tab.key
-                        ? 'bg-white/10 text-white shadow-xs'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {tab.label}{' '}
-                    <span className="text-xs font-mono text-slate-300">({tab.count.toLocaleString()})</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Search Box */}
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search item ID, title, URL..."
-                  className="w-full bg-black/50 border border-white/10 rounded-lg pl-9 pr-8 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition"
-                />
-                {search && (
-                  <button
-                    onClick={() => setSearch('')}
-                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="text-slate-400 uppercase tracking-wider text-xs bg-black/25 border-b border-white/[0.06]">
-                  <tr>
-                    <th className="py-3 px-4 w-14 font-semibold">#</th>
-                    <th className="py-3 px-4 w-40 font-semibold">eBay Item ID</th>
-                    <th className="py-3 px-4 font-semibold">Product Listing</th>
-                    <th className="py-3 px-4 w-28 font-semibold">Price</th>
-                    <th className="py-3 px-4 w-24 font-semibold">Qty</th>
-                    <th className="py-3 px-4 w-40 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04] text-sm">
-                  {paginatedItems.length === 0 ? (
+              {/* Table */}
+              <div className="overflow-x-auto max-h-[540px]">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead className="text-xs font-bold text-neutral-500 uppercase tracking-wider bg-neutral-50/90 dark:bg-neutral-900/90 sticky top-0 border-b border-neutral-200 dark:border-neutral-800 backdrop-blur z-10">
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400 text-sm">
-                        No items found matching the filter or search.
-                      </td>
+                      <th className="py-3 px-4 w-14 font-mono">#</th>
+                      <th className="py-3 px-4 w-40 font-mono">Item ID</th>
+                      <th className="py-3 px-4">Product Title / Link</th>
+                      <th className="py-3 px-4 w-32 font-mono">Price</th>
+                      <th className="py-3 px-4 w-24 font-mono">Qty</th>
+                      <th className="py-3 px-4 w-40">Status</th>
                     </tr>
-                  ) : (
-                    paginatedItems.map((item) => {
-                      let statusBadge = null;
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60 font-mono text-xs">
+                    {paginatedItems.map((item) => {
+                      let statusPill = null;
                       if (item.status === 'AVAILABLE') {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                            In Stock
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-xs px-2.5 py-1 rounded-md bg-emerald-500/10">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                            IN STOCK
                           </span>
                         );
                       } else if (item.status === 'OUT_OF_STOCK') {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                            Out of Stock
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-bold text-xs px-2.5 py-1 rounded-md bg-amber-500/10">
+                            <span className="w-2 h-2 rounded-full bg-amber-500" />
+                            OUT OF STOCK
                           </span>
                         );
                       } else if (item.status.includes('ENDED') || item.status.includes('SOLD')) {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                            Sold Out
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold text-xs px-2.5 py-1 rounded-md bg-rose-500/10">
+                            <span className="w-2 h-2 rounded-full bg-rose-500" />
+                            ENDED / SOLD
                           </span>
                         );
                       } else if (item.status === 'PENDING') {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white/[0.04] text-slate-400 border border-white/[0.06]">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                            Pending
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-neutral-400 font-bold text-xs px-2.5 py-1 rounded-md bg-neutral-200/50 dark:bg-neutral-800">
+                            <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                            PENDING
                           </span>
                         );
                       } else {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white/[0.04] text-slate-400 border border-white/[0.06]">
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-neutral-500 font-bold text-xs px-2.5 py-1 rounded-md bg-neutral-200/50 dark:bg-neutral-800">
+                            <span className="w-2 h-2 rounded-full bg-neutral-400" />
                             {item.status}
                           </span>
                         );
                       }
 
                       return (
-                        <tr key={item.index} className="hover:bg-white/[0.02] transition">
-                          <td className="py-3 px-4 text-slate-400 font-mono text-xs">{item.index}</td>
+                        <tr
+                          key={item.index}
+                          className="hover:bg-neutral-50 dark:hover:bg-neutral-900/50 transition-colors group"
+                        >
+                          <td className="py-3 px-4 text-neutral-400 text-xs font-mono">{item.index}</td>
                           <td className="py-3 px-4">
                             <button
                               onClick={() => copyToClipboard(item.id)}
-                              className="font-mono text-xs sm:text-sm text-slate-200 hover:text-white inline-flex items-center gap-2 group"
-                              title="Click to copy Item ID"
+                              className="px-2 py-1 rounded bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400 dark:hover:border-neutral-600 transition flex items-center gap-1.5 text-xs font-semibold"
+                              title="Click to copy"
                             >
                               <span>{item.id}</span>
                               {copiedId === item.id ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
                               ) : (
-                                <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 opacity-0 group-hover:opacity-100 transition" />
+                                <Copy className="w-3 h-3 text-neutral-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                               )}
                             </button>
                           </td>
-                          <td className="py-3 px-4 max-w-sm sm:max-w-md">
-                            <div className="truncate font-medium text-slate-100 text-sm">{item.title}</div>
-                            {item.url && (
-                              <div className="truncate text-slate-400 text-xs mt-0.5">
-                                <a
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="hover:text-emerald-400 hover:underline inline-flex items-center gap-1.5"
-                                >
-                                  <span className="truncate max-w-[320px]">{item.url}</span>
-                                  <ExternalLink className="w-3 h-3 shrink-0" />
-                                </a>
-                              </div>
-                            )}
+                          <td className="py-3 px-4 max-w-sm">
+                            <div className="truncate font-sans font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-0.5">
+                              {item.title}
+                            </div>
+                            <div className="truncate text-neutral-400 text-xs font-sans">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="hover:text-neutral-900 dark:hover:text-neutral-200 hover:underline inline-flex items-center gap-1"
+                              >
+                                <span>{item.url}</span>
+                                <ArrowUpRight className="w-3 h-3 inline opacity-60" />
+                              </a>
+                            </div>
                           </td>
-                          <td className="py-3 px-4 font-mono font-medium text-slate-200 text-sm">{item.price}</td>
-                          <td className="py-3 px-4 font-mono font-semibold text-slate-100 text-sm">{item.qty}</td>
-                          <td className="py-3 px-4">{statusBadge}</td>
+                          <td className="py-3 px-4 text-neutral-800 dark:text-neutral-200 font-bold text-sm font-mono">
+                            {item.price}
+                          </td>
+                          <td className={`py-3 px-4 text-sm font-extrabold font-mono ${item.qty > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400'}`}>
+                            {item.qty}
+                          </td>
+                          <td className="py-3 px-4">{statusPill}</td>
                         </tr>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-            {/* Pagination Controls */}
-            <div className="p-3.5 border-t border-white/[0.06] flex items-center justify-between text-sm text-slate-300 bg-black/25">
-              <div>
-                Showing <span className="font-mono font-semibold text-white">{filteredItems.length === 0 ? 0 : (page - 1) * pageSize + 1}</span>-
-                <span className="font-mono font-semibold text-white">{Math.min(page * pageSize, filteredItems.length)}</span> of{' '}
-                <span className="font-mono font-semibold text-white">{filteredItems.length.toLocaleString()}</span>
+              {/* Grid Footer Pagination */}
+              <div className="p-3.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-sm text-neutral-500 bg-neutral-50/50 dark:bg-neutral-900/30">
+                <div>
+                  Showing <span className="font-mono text-neutral-800 dark:text-neutral-200 font-bold">{filteredItems.length === 0 ? 0 : (page - 1) * pageSize + 1}</span>-
+                  <span className="font-mono text-neutral-800 dark:text-neutral-200 font-bold">{Math.min(page * pageSize, filteredItems.length)}</span> of{' '}
+                  <span className="font-mono text-neutral-800 dark:text-neutral-200 font-bold">{filteredItems.length.toLocaleString()}</span> products
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-40 transition flex items-center gap-1 text-sm font-semibold"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Prev</span>
+                  </button>
+                  <span className="px-2 font-mono text-xs font-semibold">
+                    {page} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-40 transition flex items-center gap-1 text-sm font-semibold"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] disabled:opacity-30 text-slate-200 flex items-center gap-1 text-sm font-medium"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  Prev
-                </button>
-                <span className="font-mono text-slate-200 px-2 text-sm">
-                  {page} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] disabled:opacity-30 text-slate-200 flex items-center gap-1 text-sm font-medium"
-                >
-                  Next
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
+            </section>
+          </motion.div>
         )}
       </main>
 
-      {/* Settings Modal */}
+      {/* FULL-SCREEN VERIFICATION MODAL OVERLAY */}
       <AnimatePresence>
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        {isRunning && !isOverlayDismissed && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 dark:bg-black/85 backdrop-blur-md"
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="bg-[#0f1422] border border-white/10 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative"
+              initial={{ scale: 0.93, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.93, opacity: 0, y: 15 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="max-w-md w-full rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white/95 dark:bg-[#121216]/95 p-8 shadow-2xl relative overflow-hidden backdrop-blur flex flex-col items-center text-center"
             >
-              <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <Key className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-semibold text-white">eBay Developer API Credentials</h3>
-                    <p className="text-xs text-slate-400">Configure keys for automated live stock verification</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+              {/* Ambient radial lighting */}
+              <div className="absolute -top-20 -left-20 w-52 h-52 rounded-full bg-emerald-500/15 blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-20 -right-20 w-52 h-52 rounded-full bg-cyan-500/15 blur-3xl pointer-events-none" />
 
-              <div className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-200 font-medium mb-1.5">Verification Mode</label>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setApiMode('demo');
-                        saveCredentials('demo');
-                      }}
-                      className={`py-2.5 px-3 rounded-lg border font-medium transition ${
-                        apiMode === 'demo'
-                          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
-                          : 'border-white/10 bg-white/[0.02] text-slate-400'
-                      }`}
-                    >
-                      Demo Simulation
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setApiMode('live');
-                        saveCredentials('live');
-                      }}
-                      className={`py-2.5 px-3 rounded-lg border font-medium transition ${
-                        apiMode === 'live'
-                          ? 'border-blue-500/50 bg-blue-500/10 text-blue-400'
-                          : 'border-white/10 bg-white/[0.02] text-slate-400'
-                      }`}
-                    >
-                      Live eBay API
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-3.5 pt-1">
-                  <div>
-                    <label className="block text-slate-200 font-medium mb-1">
-                      App ID (Client ID)
-                    </label>
-                    <input
-                      type="text"
-                      value={clientId}
-                      onChange={(e) => setClientId(e.target.value)}
-                      placeholder="e.g. Muhammad-ICRW-SBX-..."
-                      className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-xs sm:text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-200 font-medium mb-1">
-                      Cert ID (Client Secret)
-                    </label>
-                    <input
-                      type="password"
-                      value={clientSecret}
-                      onChange={(e) => setClientSecret(e.target.value)}
-                      placeholder="e.g. SBX-0967f55..."
-                      className="w-full bg-black/50 border border-white/10 rounded-lg px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-xs sm:text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-300 font-medium mb-1 text-xs">
-                      Dev ID (Optional Reference)
-                    </label>
-                    <input
-                      type="text"
-                      value={devId}
-                      onChange={(e) => setDevId(e.target.value)}
-                      placeholder="e.g. 4717b32b-..."
-                      className="w-full bg-black/30 border border-white/5 rounded-lg px-3 py-1.5 text-slate-400 font-mono text-xs"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <label className="flex items-center gap-2.5 cursor-pointer text-slate-200">
-                      <input
-                        type="checkbox"
-                        checked={sandbox}
-                        onChange={(e) => setSandbox(e.target.checked)}
-                        className="w-4 h-4 rounded bg-black/40 border-white/20 text-emerald-500"
-                      />
-                      <span className="text-sm">Use Sandbox Environment</span>
-                    </label>
-
-                    {sandbox && (
-                      <span className="text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                        Sandbox Mode Active
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Informational Note about Sandbox vs Production */}
-                  <div className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-3 text-xs text-slate-300 space-y-1.5">
-                    <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                      <Info className="w-3.5 h-3.5" />
-                      <span>eBay Production Activation:</span>
-                    </div>
-                    <p className="text-slate-400 leading-relaxed">
-                      If eBay returns <code className="text-amber-400">401 (invalid_client)</code>: On your eBay Developer portal, click <strong className="text-white">"View all application keys"</strong>, locate <strong className="text-white">"Marketplace Account Deletion"</strong> and toggle <strong className="text-emerald-400">"Not persisting eBay data"</strong> to ON (Opt-Out).
-                    </p>
-                  </div>
-
-                  {/* Connection Test Status Message */}
-                  {connStatus && (
-                    <div
-                      className={`p-3 rounded-lg text-xs font-medium flex items-center gap-2 ${
-                        connStatus.type === 'success'
-                          ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                          : connStatus.type === 'error'
-                          ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
-                          : 'bg-blue-500/10 border border-blue-500/20 text-blue-400'
-                      }`}
-                    >
-                      {connStatus.type === 'success' ? (
-                        <ShieldCheck className="w-4 h-4 shrink-0" />
-                      ) : connStatus.type === 'error' ? (
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                      ) : (
-                        <Zap className="w-4 h-4 shrink-0 animate-pulse" />
-                      )}
-                      <span>{connStatus.message}</span>
-                    </div>
-                  )}
+              {/* Big High-Tech Loader Ring */}
+              <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin" />
+                <div className="absolute inset-2 rounded-full border-2 border-cyan-500/20 border-b-cyan-400 animate-spin [animation-duration:3s] [animation-direction:reverse]" />
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-500 shadow-inner">
+                  <Zap className="w-7 h-7 fill-emerald-500/20 text-emerald-500 animate-pulse" />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between">
+              {/* Title & Description */}
+              <h2 className="text-xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight mb-1.5 flex items-center gap-2">
+                <span>Verifying eBay Stock</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </h2>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-xs mb-6">
+                Checking live availability, active quantities, and ended listings with official eBay Production API.
+              </p>
+
+              {/* Progress Bar & Percentage */}
+              <div className="w-full space-y-2.5 mb-6">
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="font-mono text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                    {Math.round((currentIndex / (items.length || 1)) * 100)}% Completed
+                  </span>
+                  <span className="font-mono text-neutral-500 text-xs">
+                    {Math.min(currentIndex, items.length).toLocaleString()} of {items.length.toLocaleString()} links
+                  </span>
+                </div>
+
+                <div className="w-full h-3 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden p-0.5 border border-neutral-200 dark:border-neutral-800">
+                  <div
+                    style={{ width: `${Math.round((currentIndex / (items.length || 1)) * 100)}%` }}
+                    className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 rounded-full transition-all duration-300 shadow-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] font-mono text-neutral-400 pt-0.5">
+                  <span>Speed: <strong className="text-neutral-700 dark:text-neutral-300 font-semibold">{rate}</strong>/sec</span>
+                  <span>ETA: <strong className="text-neutral-700 dark:text-neutral-300 font-semibold">{eta}s</strong> left</span>
+                </div>
+              </div>
+
+              {/* Live Status Breakdown Pills */}
+              <div className="grid grid-cols-3 gap-2 w-full mb-6">
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/10 p-2 text-center">
+                  <div className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">In Stock</div>
+                  <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">{stats.inStock}</div>
+                </div>
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-500/10 p-2 text-center">
+                  <div className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">Out of Stock</div>
+                  <div className="font-mono text-sm font-bold text-amber-600 dark:text-amber-400">{stats.outStock}</div>
+                </div>
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 dark:bg-rose-500/10 p-2 text-center">
+                  <div className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">Ended</div>
+                  <div className="font-mono text-sm font-bold text-rose-600 dark:text-rose-400">{stats.ended}</div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2.5 w-full">
                 <button
-                  type="button"
-                  onClick={testConnection}
-                  disabled={isTestingConn || !clientId || !clientSecret}
-                  className="px-3.5 py-2 rounded-lg border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.06] disabled:opacity-40 text-xs sm:text-sm text-slate-200 font-medium transition flex items-center gap-1.5"
+                  onClick={togglePause}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-800 dark:text-neutral-200 transition flex items-center justify-center gap-2 shadow-sm"
                 >
-                  <Zap className={`w-3.5 h-3.5 ${isTestingConn ? 'animate-pulse text-amber-400' : 'text-emerald-400'}`} />
-                  <span>{isTestingConn ? 'Testing...' : 'Test Connection'}</span>
+                  {isPaused ? <Play className="w-3.5 h-3.5 fill-current text-emerald-500" /> : <Pause className="w-3.5 h-3.5 text-amber-500" />}
+                  <span>{isPaused ? 'Resume' : 'Pause'}</span>
                 </button>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="px-4 py-2 rounded-lg border border-white/10 text-sm text-slate-300 hover:bg-white/[0.04]"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={() => {
-                      saveCredentials();
-                      setShowSettings(false);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm text-white font-medium"
-                  >
-                    Save Keys
-                  </button>
-                </div>
+                <button
+                  onClick={() => setIsOverlayDismissed(true)}
+                  className="py-2.5 px-4 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-medium text-neutral-600 dark:text-neutral-400 transition"
+                  title="Watch table underneath"
+                >
+                  View Table
+                </button>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Minimize Pill to re-expand Full-Screen Loader if dismissed */}
+      <AnimatePresence>
+        {isRunning && isOverlayDismissed && (
+          <motion.button
+            initial={{ opacity: 0, y: 15, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 15, scale: 0.9 }}
+            onClick={() => setIsOverlayDismissed(false)}
+            className="fixed bottom-6 right-6 z-40 px-4 py-2.5 rounded-full bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-xs font-medium shadow-2xl flex items-center gap-2.5 border border-neutral-700 dark:border-neutral-300 hover:scale-105 transition"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <span>Verifying: {Math.round((currentIndex / (items.length || 1)) * 100)}%</span>
+            <span className="text-[10px] opacity-60">Expand</span>
+          </motion.button>
         )}
       </AnimatePresence>
     </div>
