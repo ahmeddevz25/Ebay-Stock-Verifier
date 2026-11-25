@@ -55,6 +55,16 @@ async function checkSingleItem(itemId, token, sandbox = false) {
         price: '',
         found: false
       };
+    } else if (res.status === 429) {
+      return {
+        id: itemId,
+        status: 'RATE_LIMITED',
+        quantity: 0,
+        title: 'eBay Daily Quota Reached (429)',
+        price: '',
+        found: false,
+        rateLimited: true
+      };
     } else {
       return {
         id: itemId,
@@ -134,6 +144,16 @@ export default async function handler(req, res) {
     const results = {};
     for (const r of itemResults) {
       results[r.id] = r;
+    }
+
+    const rateLimited = itemResults.some(r => r.rateLimited);
+    if (rateLimited) {
+      return res.status(429).json({
+        success: false,
+        rateLimited: true,
+        error: 'eBay API Daily Quota Exceeded (HTTP 429 Too Many Requests). The 5,000 requests/day limit on this eBay App has been reached. Quota resets at 08:00 UTC.',
+        results
+      });
     }
 
     return res.status(200).json({ success: true, results, mode: 'live' });

@@ -116,6 +116,7 @@ export default function App() {
   // 3-Day History & Backup State
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyList, setHistoryList] = useState([]);
+  const [rateLimitError, setRateLimitError] = useState(null);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -257,6 +258,7 @@ export default function App() {
     setIsRunning(true);
     setIsPaused(false);
     setIsOverlayDismissed(false);
+    setRateLimitError(null);
     startTimeRef.current = Date.now();
 
     let cur = currentIndex >= items.length ? 0 : currentIndex;
@@ -281,6 +283,18 @@ export default function App() {
             demoMode: false
           })
         });
+
+        if (res.status === 429) {
+          const errData = await res.json().catch(() => ({}));
+          setRateLimitError(
+            errData.error ||
+            'eBay API Daily Quota Exceeded (HTTP 429 Too Many Requests). The daily limit of 5,000 requests on this eBay App has been reached. Quota resets at 08:00 UTC.'
+          );
+          isRunningRef.current = false;
+          setIsRunning(false);
+          setIsPaused(false);
+          break;
+        }
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -729,6 +743,35 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="space-y-6 w-full"
           >
+            {/* Rate Limit / API Quota Warning Banner */}
+            {rateLimitError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-900 dark:text-amber-200 flex items-start justify-between gap-3 shadow-sm"
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-sm">eBay API Daily Quota Exceeded (HTTP 429 Too Many Requests)</div>
+                    <div className="text-xs text-amber-800 dark:text-amber-300 mt-1 leading-relaxed">
+                      {rateLimitError}
+                    </div>
+                    <div className="text-xs text-amber-700 dark:text-amber-400 mt-2">
+                      💡 <strong>Hal / Solution:</strong> eBay Developer Portal par ja kar nayi Application Key generate karein aur update karein, ya kal 1:00 PM PKT (08:00 UTC) tak wait karein jab quota auto-reset hoga.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setRateLimitError(null)}
+                  className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-200 p-1"
+                  title="Dismiss"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </motion.div>
+            )}
+
             {/* Unified Command Dock */}
             <section className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121215] p-4 shadow-sm">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
