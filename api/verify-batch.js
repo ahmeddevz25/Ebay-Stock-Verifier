@@ -31,13 +31,6 @@ async function checkSingleItem(itemId, token, sandbox = false) {
         }
       }
 
-      if (item.itemEndDate) {
-        const endDate = new Date(item.itemEndDate);
-        if (endDate < new Date()) {
-          status = 'ENDED / SOLD OUT';
-        }
-      }
-
       return {
         id: itemId,
         status,
