@@ -23,10 +23,33 @@ import {
   ChevronRight,
   ArrowUpRight,
   Loader2,
-  X
+  X,
+  History,
+  Trash2,
+  Clock
 } from 'lucide-react';
+import {
+  saveSessionToHistory,
+  getHistorySessions,
+  deleteHistorySession,
+  clearAllHistorySessions
+} from './historyDB';
 
 const EBAY_ID_REGEX = /(?:itm\/(?:[^\/]+\/)?|ebay\.com\/p\/|item=)(\d{9,14})/;
+
+function formatHistoryDate(timestamp) {
+  if (!timestamp) return '';
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / (60 * 1000));
+  const hours = Math.floor(diff / (60 * 60 * 1000));
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days === 1) return 'Yesterday';
+  return `${days}d ago`;
+}
 
 function extractItemId(url) {
   if (!url) return null;
@@ -89,6 +112,23 @@ export default function App() {
   const pageSize = 25;
   const [copiedId, setCopiedId] = useState(null);
   const ebayToken = null;
+
+  // 3-Day History & Backup State
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const list = await getHistorySessions();
+      setHistoryList(list || []);
+    } catch (e) {
+      console.warn('Error loading history:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // Refs for loop controls
   const isRunningRef = useRef(false);
@@ -309,6 +349,82 @@ export default function App() {
         spread: 70,
         origin: { y: 0.6 }
       });
+
+      // Automatically preserve completed session in 3-day history backup
+      const sessionRecord = {
+        id: `sess_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        timestamp: Date.now(),
+        fileName: fileName || 'Uploaded_Sheet.xlsx',
+        fileSize: fileSize || 0,
+        selectedColumn: selectedColumn || '',
+        columns: columns || [],
+        rawRows: rawRows || [],
+        items: all,
+        stats: {
+          total: all.length,
+          inStock: all.filter((it) => it.status === 'AVAILABLE').length,
+          outStock: all.filter((it) => it.status === 'OUT_OF_STOCK').length,
+          ended: all.filter((it) => it.status.includes('ENDED') || it.status.includes('SOLD')).length,
+          invalid: all.filter((it) => it.status === 'INVALID' || it.status.includes('INVALID')).length
+        }
+      };
+
+      saveSessionToHistory(sessionRecord).then(() => {
+        loadHistory();
+      });
+    }
+  };
+
+  const restoreSession = (session) => {
+    setIsRunning(false);
+    setIsPaused(false);
+    setFileName(session.fileName || 'restored_session.xlsx');
+    setFileSize(session.fileSize || 0);
+    setRawRows(session.rawRows || []);
+    setColumns(session.columns || []);
+    setSelectedColumn(session.selectedColumn || '');
+    setItems(session.items || []);
+    itemsRef.current = session.items || [];
+    setCurrentIndex((session.items || []).length);
+    setPage(1);
+    setIsHistoryOpen(false);
+  };
+
+  const exportSessionToExcel = (session) => {
+    const exportItems = session.items || [];
+    if (exportItems.length === 0) return;
+
+    const rows = exportItems.map((it) => {
+      let stockStatus = 'PENDING';
+      if (it.status === 'AVAILABLE') stockStatus = 'IN STOCK';
+      else if (it.status === 'OUT_OF_STOCK') stockStatus = 'OUT OF STOCK';
+      else if (it.status.includes('ENDED') || it.status.includes('SOLD')) stockStatus = 'ENDED / SOLD OUT';
+      else if (it.status.includes('INVALID') || it.status.includes('NOT FOUND')) stockStatus = 'INVALID / REMOVED';
+      else stockStatus = it.status;
+
+      return {
+        ...(it.rawRow || {}),
+        'Stock Status': stockStatus
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Verified Stock');
+    const baseName = session.fileName ? session.fileName.replace(/\.[^/.]+$/, '') : 'ebay_stock';
+    XLSX.writeFile(wb, `${baseName}_backup_verified.xlsx`);
+  };
+
+  const handleDeleteSession = async (e, id) => {
+    e.stopPropagation();
+    await deleteHistorySession(id);
+    loadHistory();
+  };
+
+  const handleClearAllHistory = async () => {
+    if (window.confirm('Are you sure you want to clear all history backups?')) {
+      await clearAllHistorySessions();
+      loadHistory();
     }
   };
 
@@ -465,8 +581,22 @@ export default function App() {
             </div>
           </div>
 
-          {/* Theme Switcher Only */}
+          {/* Top Actions: History (3-Day Backup) & Theme Switcher */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsHistoryOpen(true)}
+              className="px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
+              title="Verification History & 3-Day Backup"
+            >
+              <History className="w-4 h-4 text-emerald-500" />
+              <span>History</span>
+              {historyList.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-mono text-[11px] font-bold">
+                  {historyList.length}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={toggleTheme}
               className="px-3.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
@@ -483,7 +613,7 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-4 py-6 flex-1 w-full flex flex-col justify-center">
         {/* VIEW 1: Clean Dedicated File Upload Screen (When No File Loaded) */}
         {items.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-16 px-4">
+          <div className="flex-1 flex flex-col items-center justify-center py-12 px-4">
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
@@ -519,6 +649,77 @@ export default function App() {
                 Supports .xlsx &bull; .xls &bull; .csv (Up to 10k+ rows)
               </p>
             </motion.div>
+
+            {/* Quick 3-Day History / Recent Backups on Upload Screen */}
+            {historyList.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: 0.1 }}
+                className="max-w-xl w-full mt-10"
+              >
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-500" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+                      Recent Backups (Kept for 3 Days)
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setIsHistoryOpen(true)}
+                    className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
+                  >
+                    View all ({historyList.length}) &rarr;
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {historyList.slice(0, 3).map((session) => (
+                    <div
+                      key={session.id}
+                      onClick={() => restoreSession(session)}
+                      className="group p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121215] hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-sm transition-all cursor-pointer flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center text-neutral-600 dark:text-neutral-300 flex-shrink-0 group-hover:text-emerald-500 group-hover:border-emerald-500/30 transition">
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
+                            {session.fileName}
+                          </div>
+                          <div className="text-xs text-neutral-400 flex items-center gap-2 font-mono mt-0.5">
+                            <span>{formatHistoryDate(session.timestamp)}</span>
+                            <span>&bull;</span>
+                            <span>{session.stats?.total || session.items?.length || 0} items</span>
+                            <span>&bull;</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                              {session.stats?.inStock || 0} in stock
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => exportSessionToExcel(session)}
+                          className="p-2 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+                          title="Download Excel (.xlsx)"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => restoreSession(session)}
+                          className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 text-xs font-semibold shadow-sm transition"
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
           </div>
         ) : (
           /* VIEW 2: The Verification Workspace (Shows Only After File Loaded) */
@@ -960,6 +1161,143 @@ export default function App() {
             <span>Verifying: {Math.round((currentIndex / (items.length || 1)) * 100)}%</span>
             <span className="text-[10px] opacity-60">Expand</span>
           </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* 3-DAY VERIFICATION HISTORY & BACKUP MODAL */}
+      <AnimatePresence>
+        {isHistoryOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
+            onClick={() => setIsHistoryOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 12 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-2xl w-full max-h-[85vh] rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121216] shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/50 dark:bg-neutral-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center flex-shrink-0">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+                      <span>Verification History</span>
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                        3-Day Backup
+                      </span>
+                    </h3>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      Past sheets are safely backed up for 3 days so you never lose verified data.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {historyList.length > 0 && (
+                    <button
+                      onClick={handleClearAllHistory}
+                      className="text-xs text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-medium px-2.5 py-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition flex items-center gap-1.5"
+                      title="Clear all backups"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear All</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsHistoryOpen(false)}
+                    className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Sessions Scroll List */}
+              <div className="p-4 overflow-y-auto space-y-3 flex-1">
+                {historyList.length === 0 ? (
+                  <div className="py-14 text-center text-neutral-400 text-sm">
+                    <History className="w-10 h-10 mx-auto mb-2.5 text-neutral-300 dark:text-neutral-700 opacity-60" />
+                    <p className="font-bold text-neutral-700 dark:text-neutral-300">No backup sessions yet</p>
+                    <p className="text-xs text-neutral-400 mt-1 max-w-sm mx-auto">
+                      Whenever you verify an Excel sheet, a complete snapshot is automatically preserved here for 3 days.
+                    </p>
+                  </div>
+                ) : (
+                  historyList.map((session) => (
+                    <div
+                      key={session.id}
+                      className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 hover:bg-neutral-50 dark:hover:bg-neutral-900/70 p-4 transition flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-bold text-sm text-neutral-900 dark:text-neutral-100 truncate">
+                            {session.fileName}
+                          </span>
+                          <span className="text-[11px] font-mono text-neutral-400 flex-shrink-0">
+                            {formatHistoryDate(session.timestamp)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs font-mono mt-1.5 flex-wrap">
+                          <span className="text-neutral-700 dark:text-neutral-300 font-bold">
+                            {(session.stats?.total || session.items?.length || 0).toLocaleString()} items
+                          </span>
+                          <span className="text-neutral-300 dark:text-neutral-700">&bull;</span>
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                            {(session.stats?.inStock || 0).toLocaleString()} in stock
+                          </span>
+                          <span className="text-neutral-300 dark:text-neutral-700">&bull;</span>
+                          <span className="text-amber-600 dark:text-amber-400 font-bold">
+                            {(session.stats?.outStock || 0).toLocaleString()} out
+                          </span>
+                          <span className="text-neutral-300 dark:text-neutral-700">&bull;</span>
+                          <span className="text-rose-600 dark:text-rose-400 font-bold">
+                            {(session.stats?.ended || 0).toLocaleString()} ended
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => exportSessionToExcel(session)}
+                          className="px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-white dark:hover:bg-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-200 transition flex items-center gap-1.5 shadow-sm"
+                          title="Export verified Excel (.xlsx)"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export</span>
+                        </button>
+
+                        <button
+                          onClick={() => restoreSession(session)}
+                          className="px-3.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 text-xs font-semibold shadow-sm transition flex items-center gap-1.5"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Restore</span>
+                        </button>
+
+                        <button
+                          onClick={(e) => handleDeleteSession(e, session.id)}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                          title="Delete backup"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
