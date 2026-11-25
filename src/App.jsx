@@ -513,25 +513,29 @@ export default function App() {
     let inStock = 0,
       outStock = 0,
       ended = 0,
+      rateLimited = 0,
       invalid = 0;
     for (const it of items) {
       if (it.status === 'AVAILABLE') inStock++;
       else if (it.status === 'OUT_OF_STOCK') outStock++;
       else if (it.status.includes('ENDED') || it.status.includes('SOLD')) ended++;
+      else if (it.status === 'RATE_LIMITED' || it.status.includes('429') || it.title?.includes('429')) rateLimited++;
       else if (it.status === 'INVALID' || it.status.includes('INVALID')) invalid++;
     }
-    const verified = inStock + outStock + ended + invalid;
+    const verified = inStock + outStock + ended + rateLimited + invalid;
     const total = items.length || 1;
     return {
       inStock,
       outStock,
       ended,
+      rateLimited,
       invalid,
       verified,
       total: items.length,
       pctInStock: Math.round((inStock / total) * 100),
       pctOutStock: Math.round((outStock / total) * 100),
       pctEnded: Math.round((ended / total) * 100),
+      pctRateLimited: Math.round((rateLimited / total) * 100),
       pctInvalid: Math.round((invalid / total) * 100),
       pctOverall: Math.round((currentIndex / total) * 100)
     };
@@ -540,7 +544,11 @@ export default function App() {
   // Filtered Table Items
   const filteredItems = useMemo(() => {
     let res = items;
-    if (filter !== 'ALL') {
+    if (filter === 'RATE_LIMITED') {
+      res = res.filter((it) => it.status === 'RATE_LIMITED' || it.status.includes('429') || it.title?.includes('429'));
+    } else if (filter === 'INVALID') {
+      res = res.filter((it) => (it.status === 'INVALID' || it.status.includes('INVALID')) && !it.title?.includes('429') && it.status !== 'RATE_LIMITED');
+    } else if (filter !== 'ALL') {
       res = res.filter((it) => it.status.startsWith(filter));
     }
     if (search.trim()) {
