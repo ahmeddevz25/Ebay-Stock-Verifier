@@ -525,9 +525,37 @@ export default function App() {
     setCurrentIndex(0);
     setRate(0);
     setEta(0);
-    if (rawRows.length > 0) {
-      setupItemsFromData(rawRows, selectedColumn, fileName, fileSize, columns);
-    }
+    setRateLimitError(null);
+
+    // Guaranteed reset of all items back to fresh PENDING state
+    const sourceList = (itemsRef.current && itemsRef.current.length > 0) ? itemsRef.current : items;
+    const resetItems = sourceList.map((it, idx) => {
+      let origTitle = `Item #${it.id || idx + 1}`;
+      if (it.rawRow) {
+        origTitle = it.rawRow['Product Name'] || it.rawRow['Title'] || it.rawRow['title'] || origTitle;
+      }
+      return {
+        ...it,
+        status: 'PENDING',
+        price: '-',
+        qty: '-',
+        title: origTitle
+      };
+    });
+
+    setItems(resetItems);
+    itemsRef.current = resetItems;
+    setPage(1);
+
+    saveActiveSession({
+      fileName: fileNameRef.current || fileName || 'Uploaded_Sheet.xlsx',
+      fileSize: fileSizeRef.current || fileSize || 0,
+      columns: columnsRef.current || columns || [],
+      selectedColumn: selectedColumnRef.current || selectedColumn || '',
+      rawRows: rawRowsRef.current || rawRows || [],
+      items: resetItems,
+      currentIndex: 0
+    });
   };
 
   const clearFile = () => {
@@ -917,10 +945,11 @@ export default function App() {
                   {!isRunning && items.length > 0 && (
                     <button
                       onClick={resetAll}
-                      className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
-                      title="Reset Verification"
+                      className="px-3.5 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition flex items-center gap-1.5 text-xs font-semibold shadow-sm"
+                      title="Reset Table to Pending"
                     >
-                      <RotateCcw className="w-4 h-4" />
+                      <RotateCcw className="w-3.5 h-3.5 text-neutral-500" />
+                      <span>Reset</span>
                     </button>
                   )}
 
