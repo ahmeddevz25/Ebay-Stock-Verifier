@@ -574,6 +574,15 @@ export default function App() {
     clearActiveSession();
   };
 
+  const handleHomeClick = () => {
+    if (isRunning) {
+      if (!window.confirm('Verification is currently in progress. Return to home screen?')) {
+        return;
+      }
+    }
+    clearFile();
+  };
+
   // Export to Excel
   const exportToExcel = (exportFilter = 'ALL') => {
     if (items.length === 0) return;
@@ -689,19 +698,23 @@ export default function App() {
       {/* Top Header — Clean, Uncluttered, Minimal */}
       <header className="border-b border-neutral-200 dark:border-neutral-800/80 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-neutral-900 dark:bg-neutral-100 flex items-center justify-center text-white dark:text-neutral-900 font-bold text-sm">
+          {/* Brand / Home Link */}
+          <button
+            onClick={handleHomeClick}
+            className="flex items-center gap-3 hover:opacity-80 transition cursor-pointer text-left focus:outline-none"
+            title="Go to Home Screen"
+          >
+            <div className="w-8 h-8 rounded-lg bg-neutral-900 dark:bg-neutral-100 flex items-center justify-center text-white dark:text-neutral-900 font-bold text-sm shadow-sm">
               S
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-base tracking-tight">Stockline</span>
+              <span className="font-bold text-base tracking-tight text-neutral-900 dark:text-neutral-100">Stockline</span>
               <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live eBay
               </span>
             </div>
-          </div>
+          </button>
 
           {/* Top Actions: History (3-Day Backup) & Theme Switcher */}
           <div className="flex items-center gap-2">
