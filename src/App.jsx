@@ -310,6 +310,10 @@ export default function App() {
             if (r.title && (!item.title || item.title.startsWith('Item #'))) {
               item.title = r.title;
             }
+            if (r.rateLimited || r.status === 'RATE_LIMITED' || r.title?.includes('429')) {
+              item.status = 'RATE_LIMITED';
+              item.title = 'eBay Daily Quota Reached (429)';
+            }
           } else {
             item.status = item.id === 'N/A' ? 'INVALID' : 'ENDED / SOLD OUT';
             item.qty = 0;
@@ -765,9 +769,6 @@ export default function App() {
                     <div className="text-xs text-amber-800 dark:text-amber-300 mt-1 leading-relaxed">
                       {rateLimitError}
                     </div>
-                    <div className="text-xs text-amber-700 dark:text-amber-400 mt-2">
-                      💡 <strong>Hal / Solution:</strong> eBay Developer Portal par ja kar nayi Application Key generate karein aur update karein, ya kal 1:00 PM PKT (08:00 UTC) tak wait karein jab quota auto-reset hoga.
-                    </div>
                   </div>
                 </div>
                 <button
@@ -903,6 +904,13 @@ export default function App() {
                     <span className="text-neutral-800 dark:text-neutral-200 font-mono font-bold">{stats.ended.toLocaleString()}</span>
                     <span>Ended / Sold ({stats.pctEnded}%)</span>
                   </div>
+                  {stats.rateLimited > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span className="text-amber-600 dark:text-amber-400 font-mono font-bold">{stats.rateLimited.toLocaleString()}</span>
+                      <span className="text-amber-600 dark:text-amber-400">Rate Limited ({stats.pctRateLimited}%)</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="font-mono text-xs text-neutral-400">
@@ -922,6 +930,7 @@ export default function App() {
                     { key: 'AVAILABLE', label: 'In Stock', count: stats.inStock },
                     { key: 'OUT_OF_STOCK', label: 'Out of Stock', count: stats.outStock },
                     { key: 'ENDED', label: 'Ended', count: stats.ended },
+                    ...(stats.rateLimited > 0 ? [{ key: 'RATE_LIMITED', label: 'Rate Limited (429)', count: stats.rateLimited }] : []),
                     { key: 'INVALID', label: 'Invalid', count: stats.invalid }
                   ].map((tab) => (
                     <button
@@ -993,6 +1002,13 @@ export default function App() {
                           <span className="inline-flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold text-xs px-2.5 py-1 rounded-md bg-rose-500/10">
                             <span className="w-2 h-2 rounded-full bg-rose-500" />
                             ENDED / SOLD
+                          </span>
+                        );
+                      } else if (item.status === 'RATE_LIMITED' || item.status.includes('429') || item.title?.includes('429')) {
+                        statusPill = (
+                          <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-bold text-xs px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30">
+                            <span className="w-2 h-2 rounded-full bg-amber-500" />
+                            RATE LIMITED (429)
                           </span>
                         );
                       } else if (item.status === 'PENDING') {
