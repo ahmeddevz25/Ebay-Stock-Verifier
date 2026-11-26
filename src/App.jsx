@@ -32,7 +32,10 @@ import {
   saveSessionToHistory,
   getHistorySessions,
   deleteHistorySession,
-  clearAllHistorySessions
+  clearAllHistorySessions,
+  saveActiveSession,
+  getActiveSession,
+  clearActiveSession
 } from './historyDB';
 
 const EBAY_ID_REGEX = /(?:itm\/(?:[^\/]+\/)?|ebay\.com\/p\/|item=)(\d{9,14})/;
@@ -131,7 +134,24 @@ export default function App() {
     loadHistory();
   }, [loadHistory]);
 
-  // Refs for loop controls
+  // Auto-restore active session across F5 / page reloads / network disconnects
+  useEffect(() => {
+    getActiveSession().then((session) => {
+      if (session && session.items && session.items.length > 0) {
+        setFileName(session.fileName || 'restored_session.xlsx');
+        setFileSize(session.fileSize || 0);
+        setRawRows(session.rawRows || []);
+        setColumns(session.columns || []);
+        setSelectedColumn(session.selectedColumn || '');
+        setItems(session.items || []);
+        itemsRef.current = session.items || [];
+        setCurrentIndex(session.currentIndex || 0);
+        setPage(1);
+      }
+    });
+  }, []);
+
+  // Refs for loop controls and active state
   const isRunningRef = useRef(false);
   const isPausedRef = useRef(false);
   const itemsRef = useRef([]);
@@ -139,17 +159,20 @@ export default function App() {
   const fileInputRef = useRef(null);
   const searchInputRef = useRef(null);
 
-  useEffect(() => {
-    isRunningRef.current = isRunning;
-  }, [isRunning]);
+  const fileNameRef = useRef('');
+  const fileSizeRef = useRef(0);
+  const selectedColumnRef = useRef('');
+  const columnsRef = useRef([]);
+  const rawRowsRef = useRef([]);
 
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
-
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
+  useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => { fileNameRef.current = fileName; }, [fileName]);
+  useEffect(() => { fileSizeRef.current = fileSize; }, [fileSize]);
+  useEffect(() => { selectedColumnRef.current = selectedColumn; }, [selectedColumn]);
+  useEffect(() => { columnsRef.current = columns; }, [columns]);
+  useEffect(() => { rawRowsRef.current = rawRows; }, [rawRows]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -212,12 +235,16 @@ export default function App() {
       if (!detected) detected = headers[0];
       setSelectedColumn(detected);
 
-      setupItemsFromData(json, detected);
+      setupItemsFromData(json, detected, file.name, file.size, headers);
     };
     reader.readAsArrayBuffer(file);
   }, []);
 
-  const setupItemsFromData = (rows, colName) => {
+  const setupItemsFromData = (rows, colName, fName, fSize, headersList) => {
+    const finalName = fName || fileName || fileNameRef.current || 'Uploaded_Sheet.xlsx';
+    const finalSize = fSize || fileSize || fileSizeRef.current || 0;
+    const finalCols = headersList || columns || columnsRef.current || [];
+
     const parsed = rows.map((row, idx) => {
       const url = String(row[colName] || '').trim();
       const id = extractItemId(url);
@@ -239,13 +266,24 @@ export default function App() {
     setIsRunning(false);
     setIsPaused(false);
     setPage(1);
+
+    // Save active state to IndexedDB so reload preserves the table
+    saveActiveSession({
+      fileName: finalName,
+      fileSize: finalSize,
+      columns: finalCols,
+      selectedColumn: colName,
+      rawRows: rows,
+      items: parsed,
+      currentIndex: 0
+    });
   };
 
   const handleColumnChange = (e) => {
     const newCol = e.target.value;
     setSelectedColumn(newCol);
     if (rawRows.length > 0) {
-      setupItemsFromData(rawRows, newCol);
+      setupItemsFromData(rawRows, newCol, fileName, fileSize, columns);
     }
   };
 
@@ -354,12 +392,30 @@ export default function App() {
       setEta(Math.max(0, Math.round((all.length - cur) / (speed || 1))));
 
       setItems([...all]);
+      saveActiveSession({
+        fileName: fileNameRef.current || fileName || 'Uploaded_Sheet.xlsx',
+        fileSize: fileSizeRef.current || fileSize || 0,
+        columns: columnsRef.current || columns || [],
+        selectedColumn: selectedColumnRef.current || selectedColumn || '',
+        rawRows: rawRowsRef.current || rawRows || [],
+        items: all,
+        currentIndex: cur
+      });
       await new Promise((r) => setTimeout(r, 40));
     }
 
     isRunningRef.current = false;
     setIsRunning(false);
     setItems([...all]);
+    saveActiveSession({
+      fileName: fileNameRef.current || fileName || 'Uploaded_Sheet.xlsx',
+      fileSize: fileSizeRef.current || fileSize || 0,
+      columns: columnsRef.current || columns || [],
+      selectedColumn: selectedColumnRef.current || selectedColumn || '',
+      rawRows: rawRowsRef.current || rawRows || [],
+      items: all,
+      currentIndex: cur
+    });
 
     if (cur >= all.length) {
       confetti({
@@ -406,6 +462,15 @@ export default function App() {
     setCurrentIndex((session.items || []).length);
     setPage(1);
     setIsHistoryOpen(false);
+    saveActiveSession({
+      fileName: session.fileName || 'restored_session.xlsx',
+      fileSize: session.fileSize || 0,
+      columns: session.columns || [],
+      selectedColumn: session.selectedColumn || '',
+      rawRows: session.rawRows || [],
+      items: session.items || [],
+      currentIndex: (session.items || []).length
+    });
   };
 
   const exportSessionToExcel = (session) => {
@@ -461,11 +526,13 @@ export default function App() {
     setRate(0);
     setEta(0);
     if (rawRows.length > 0) {
-      setupItemsFromData(rawRows, selectedColumn);
+      setupItemsFromData(rawRows, selectedColumn, fileName, fileSize, columns);
     }
   };
 
   const clearFile = () => {
+    isRunningRef.current = false;
+    isPausedRef.current = false;
     setIsRunning(false);
     setIsPaused(false);
     setRawRows([]);
@@ -476,6 +543,7 @@ export default function App() {
     setFileSize(0);
     setCurrentIndex(0);
     setPage(1);
+    clearActiveSession();
   };
 
   // Export to Excel
