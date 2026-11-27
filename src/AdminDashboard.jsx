@@ -23,7 +23,7 @@ import {
 export default function AdminDashboard({ onExit }) {
   const [passcode, setPasscode] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem('stockline_admin_auth') === 'true';
+    return !!sessionStorage.getItem('stockline_admin_pin');
   });
   const [authError, setAuthError] = useState('');
   const [sessions, setSessions] = useState([]);
@@ -33,36 +33,56 @@ export default function AdminDashboard({ onExit }) {
   const [activeSession, setActiveSession] = useState(null);
   const [selectedItemFilter, setSelectedItemFilter] = useState('ALL');
 
-  const correctPin = import.meta.env.VITE_ADMIN_PASSCODE || 'ahmed123';
-
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (passcode === correctPin) {
-      sessionStorage.setItem('stockline_admin_auth', 'true');
+    if (!passcode.trim()) return;
+    setIsLoading(true);
+    setAuthError('');
+    try {
+      const res = await fetch('/api/admin-sessions', {
+        headers: {
+          'x-admin-passcode': passcode.trim()
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Incorrect Admin PIN. Please try again.');
+      }
+      sessionStorage.setItem('stockline_admin_pin', passcode.trim());
       setIsAuthenticated(true);
-      setAuthError('');
-    } else {
-      setAuthError('Incorrect Admin PIN. Please try again.');
+      setSessions(data.sessions || []);
+    } catch (err) {
+      setAuthError(err.message || 'Incorrect Admin PIN. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('stockline_admin_auth');
+    sessionStorage.removeItem('stockline_admin_pin');
     setIsAuthenticated(false);
     setPasscode('');
+    setSessions([]);
   };
 
   const loadSessions = async () => {
+    const pin = sessionStorage.getItem('stockline_admin_pin') || passcode;
+    if (!pin) return;
     setIsLoading(true);
     setFetchError('');
     try {
       const res = await fetch('/api/admin-sessions', {
         headers: {
-          'x-admin-passcode': correctPin
+          'x-admin-passcode': pin
         }
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401) {
+          sessionStorage.removeItem('stockline_admin_pin');
+          setIsAuthenticated(false);
+          throw new Error('Session expired or Invalid PIN');
+        }
         throw new Error(data.error || 'Failed to fetch client sessions');
       }
       setSessions(data.sessions || []);
@@ -81,13 +101,18 @@ export default function AdminDashboard({ onExit }) {
 
   const handleDeleteSession = async (id) => {
     if (!window.confirm('Delete this client session record?')) return;
+    const pin = sessionStorage.getItem('stockline_admin_pin') || passcode;
     try {
-      await fetch(`/api/admin-sessions?id=${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/admin-sessions?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: {
-          'x-admin-passcode': correctPin
+          'x-admin-passcode': pin
         }
       });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Delete failed');
+      }
       setSessions((prev) => prev.filter((s) => s.id !== id));
       if (activeSession?.id === id) setActiveSession(null);
     } catch (e) {
