@@ -159,7 +159,7 @@ export default function AdminDashboard({ onExit }) {
                 type="password"
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
-                placeholder="Enter PIN (e.g. ahmed123)"
+                placeholder="Enter Admin PIN"
                 className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 focus:border-emerald-500 text-white font-mono text-sm outline-none transition"
                 autoFocus
               />
