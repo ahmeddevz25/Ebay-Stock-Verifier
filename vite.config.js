@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react';
 const env = loadEnv('development', process.cwd(), '');
 const PRODUCTION_CLIENT_ID = env.EBAY_CLIENT_ID || env.VITE_EBAY_CLIENT_ID || process.env.EBAY_CLIENT_ID || '';
 const PRODUCTION_CLIENT_SECRET = env.EBAY_CLIENT_SECRET || env.VITE_EBAY_CLIENT_SECRET || process.env.EBAY_CLIENT_SECRET || '';
+const SUPABASE_URL = env.SUPABASE_URL || process.env.SUPABASE_URL || 'https://jojsgxjobnuhucdiemzz.supabase.co';
+const SUPABASE_SERVICE_KEY = env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const ADMIN_PASSCODE = env.ADMIN_PASSCODE || process.env.ADMIN_PASSCODE || 'ahmed123';
 
 let localCachedToken = null;
 let localTokenExpiry = 0;
@@ -203,6 +206,97 @@ function apiDevPlugin() {
             }
           });
           return;
+        }
+
+        // Handle Session Logging to Supabase
+        if (req.url === '/api/log-session' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const parsed = JSON.parse(body || '{}');
+              const record = {
+                id: parsed.id || `sess_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                file_name: parsed.fileName || 'Unnamed_Sheet.xlsx',
+                file_size: parsed.fileSize || 0,
+                total_items: parsed.totalItems || 0,
+                in_stock: parsed.inStock || 0,
+                out_of_stock: parsed.outStock || 0,
+                ended: parsed.ended || 0,
+                rate_limited: !!parsed.rateLimited,
+                error_details: parsed.errorDetails || '',
+                items_data: (parsed.itemsData || []).slice(0, 1000),
+                created_at: new Date().toISOString()
+              };
+
+              const sbRes = await fetch(`${SUPABASE_URL}/rest/v1/client_sessions`, {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_SERVICE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify(record)
+              });
+
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: sbRes.ok }));
+            } catch (err) {
+              console.warn('Local log-session error:', err.message);
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: err.message }));
+            }
+          });
+          return;
+        }
+
+        // Handle Admin Sessions Fetch / Delete
+        if (req.url?.startsWith('/api/admin-sessions')) {
+          const clientPasscode = req.headers['x-admin-passcode'];
+          if (clientPasscode !== ADMIN_PASSCODE) {
+            res.statusCode = 401;
+            res.setHeader('Content-Type', 'application/json');
+            return res.end(JSON.stringify({ error: 'Unauthorized: Invalid Admin PIN' }));
+          }
+
+          if (req.method === 'GET') {
+            try {
+              const sbRes = await fetch(`${SUPABASE_URL}/rest/v1/client_sessions?select=*&order=created_at.desc&limit=100`, {
+                headers: {
+                  'apikey': SUPABASE_SERVICE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+                }
+              });
+              const sessions = await sbRes.json();
+              res.setHeader('Content-Type', 'application/json');
+              return res.end(JSON.stringify({ success: true, sessions }));
+            } catch (err) {
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              return res.end(JSON.stringify({ error: err.message }));
+            }
+          }
+
+          if (req.method === 'DELETE') {
+            const urlObj = new URL(req.url, 'http://localhost');
+            const id = urlObj.searchParams.get('id');
+            try {
+              await fetch(`${SUPABASE_URL}/rest/v1/client_sessions?id=eq.${encodeURIComponent(id)}`, {
+                method: 'DELETE',
+                headers: {
+                  'apikey': SUPABASE_SERVICE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+                }
+              });
+              res.setHeader('Content-Type', 'application/json');
+              return res.end(JSON.stringify({ success: true, deleted: id }));
+            } catch (err) {
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              return res.end(JSON.stringify({ error: err.message }));
+            }
+          }
         }
 
         next();

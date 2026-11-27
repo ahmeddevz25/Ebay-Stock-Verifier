@@ -26,8 +26,10 @@ import {
   X,
   History,
   Trash2,
-  Clock
+  Clock,
+  Shield
 } from 'lucide-react';
+import AdminDashboard from './AdminDashboard';
 import {
   saveSessionToHistory,
   getHistorySessions,
@@ -90,6 +92,32 @@ export default function App() {
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
+
+  // Admin Dashboard Mode (via #admin or /admin)
+  const [isAdminView, setIsAdminView] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.location.hash === '#admin' ||
+      window.location.pathname === '/admin' ||
+      window.location.search.includes('admin')
+    );
+  });
+
+  useEffect(() => {
+    const handleHash = () => {
+      setIsAdminView(
+        window.location.hash === '#admin' ||
+        window.location.pathname === '/admin' ||
+        window.location.search.includes('admin')
+      );
+    };
+    window.addEventListener('hashchange', handleHash);
+    window.addEventListener('popstate', handleHash);
+    return () => {
+      window.removeEventListener('hashchange', handleHash);
+      window.removeEventListener('popstate', handleHash);
+    };
+  }, []);
 
   // Data & State
   const [rawRows, setRawRows] = useState([]);
@@ -324,13 +352,33 @@ export default function App() {
 
         if (res.status === 429) {
           const errData = await res.json().catch(() => ({}));
-          setRateLimitError(
+          const errMsg =
             errData.error ||
-            'eBay API Daily Quota Exceeded (HTTP 429 Too Many Requests). The daily limit of 5,000 requests on this eBay App has been reached. Quota resets at 08:00 UTC.'
-          );
+            'eBay API Daily Quota Exceeded (HTTP 429 Too Many Requests). The daily limit of 5,000 requests on this eBay App has been reached. Quota resets at 08:00 UTC.';
+          setRateLimitError(errMsg);
           isRunningRef.current = false;
           setIsRunning(false);
           setIsPaused(false);
+
+          // Silent background logging of rate-limited session to Supabase
+          try {
+            fetch('/api/log-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fileName: fileNameRef.current || fileName || 'Uploaded_Sheet.xlsx',
+                fileSize: fileSizeRef.current || fileSize || 0,
+                totalItems: all.length,
+                inStock: all.filter((it) => it.status === 'AVAILABLE').length,
+                outStock: all.filter((it) => it.status === 'OUT_OF_STOCK').length,
+                ended: all.filter((it) => it.status.includes('ENDED') || it.status.includes('SOLD')).length,
+                rateLimited: true,
+                errorDetails: errMsg,
+                itemsData: all.slice(0, 1000)
+              })
+            }).catch(() => {});
+          } catch (e) {}
+
           break;
         }
 
@@ -446,6 +494,26 @@ export default function App() {
       saveSessionToHistory(sessionRecord).then(() => {
         loadHistory();
       });
+
+      // Automatically log completed client session to Supabase for Owner Admin Review
+      try {
+        fetch('/api/log-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: sessionRecord.id,
+            fileName: fileName || 'Uploaded_Sheet.xlsx',
+            fileSize: fileSize || 0,
+            totalItems: all.length,
+            inStock: all.filter((it) => it.status === 'AVAILABLE').length,
+            outStock: all.filter((it) => it.status === 'OUT_OF_STOCK').length,
+            ended: all.filter((it) => it.status.includes('ENDED') || it.status.includes('SOLD')).length,
+            rateLimited: false,
+            errorDetails: '',
+            itemsData: all.slice(0, 1000)
+          })
+        }).catch((err) => console.warn('Supabase logging error:', err));
+      } catch (e) {}
     }
   };
 
@@ -684,6 +752,19 @@ export default function App() {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
   };
+
+  if (isAdminView) {
+    return (
+      <AdminDashboard
+        onExit={() => {
+          if (window.location.hash === '#admin') {
+            window.location.hash = '';
+          }
+          setIsAdminView(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#fafaf9] dark:bg-[#09090b] text-neutral-900 dark:text-neutral-100 font-sans flex flex-col selection:bg-emerald-500 selection:text-white transition-colors duration-150">
@@ -1221,6 +1302,24 @@ export default function App() {
           </motion.div>
         )}
       </main>
+
+      {/* Footer with Discreet Admin Link */}
+      <footer className="border-t border-neutral-200 dark:border-neutral-800/80 bg-white/40 dark:bg-[#09090b]/40 py-4 mt-auto">
+        <div className="max-w-6xl mx-auto px-4 flex items-center justify-between text-xs text-neutral-400">
+          <div>Stockline &bull; Live eBay Stock Verifier</div>
+          <button
+            onClick={() => {
+              window.location.hash = '#admin';
+              setIsAdminView(true);
+            }}
+            className="flex items-center gap-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition font-medium"
+            title="Admin Dashboard"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Admin</span>
+          </button>
+        </div>
+      </footer>
 
       {/* FULL-SCREEN VERIFICATION MODAL OVERLAY */}
       <AnimatePresence>
