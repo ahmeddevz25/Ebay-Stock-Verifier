@@ -1303,21 +1303,11 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer with Discreet Admin Link */}
+      {/* Footer */}
       <footer className="border-t border-neutral-200 dark:border-neutral-800/80 bg-white/40 dark:bg-[#09090b]/40 py-4 mt-auto">
         <div className="max-w-6xl mx-auto px-4 flex items-center justify-between text-xs text-neutral-400">
           <div>Stockline &bull; Live eBay Stock Verifier</div>
-          <button
-            onClick={() => {
-              window.location.hash = '#admin';
-              setIsAdminView(true);
-            }}
-            className="flex items-center gap-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition font-medium"
-            title="Admin Dashboard"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Admin</span>
-          </button>
+          <div>&copy; {new Date().getFullYear()} Stockline</div>
         </div>
       </footer>
 
