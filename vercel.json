@@ -4,6 +4,8 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/ebay/auth", "destination": "/api/auth" },
-    { "source": "/api/ebay/verify-batch", "destination": "/api/verify-batch" }
+    { "source": "/api/ebay/verify-batch", "destination": "/api/verify-batch" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
