@@ -20,7 +20,15 @@ async function checkSingleItem(itemId, token, sandbox = false) {
       let status = 'AVAILABLE';
       let availableQty = 0;
 
-      if (item.estimatedAvailabilities && item.estimatedAvailabilities.length > 0) {
+      // 1. Check if listing has already ended (expired itemEndDate)
+      const now = Date.now();
+      const endDateMs = item.itemEndDate ? new Date(item.itemEndDate).getTime() : null;
+      const isEnded = endDateMs && endDateMs <= now;
+
+      if (isEnded) {
+        status = 'ENDED / SOLD OUT';
+        availableQty = 0;
+      } else if (item.estimatedAvailabilities && item.estimatedAvailabilities.length > 0) {
         const avail = item.estimatedAvailabilities[0];
         availableQty = avail.estimatedRemainingQuantity ?? avail.estimatedAvailableQuantity ?? 0;
         const availStatus = avail.estimatedAvailabilityStatus || avail.availabilityStatus || '';
@@ -29,6 +37,9 @@ async function checkSingleItem(itemId, token, sandbox = false) {
         } else if (availStatus === 'IN_STOCK' || availableQty > 0) {
           status = 'AVAILABLE';
         }
+      } else if (item.estimatedAvailableQuantity === 0) {
+        status = 'OUT_OF_STOCK';
+        availableQty = 0;
       }
 
       return {
